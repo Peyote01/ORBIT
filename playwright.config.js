@@ -1,0 +1,2 @@
+import {defineConfig} from '@playwright/test';
+export default defineConfig({testDir:'tests',testMatch:'**/*.spec.js',use:{baseURL:'http://127.0.0.1:3000',launchOptions:{args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']}},webServer:{command:'npm start',url:'http://127.0.0.1:3000/health',reuseExistingServer:!process.env.CI},reporter:'list'});

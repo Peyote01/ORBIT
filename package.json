@@ -1,0 +1,23 @@
+{
+  "name": "orbit-salvage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "2–4 player cooperative 3D salvage prototype",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test tests/*.test.js",
+    "check": "node --check server/index.js && node --check shared/game.js && node --check public/client.js && node --check public/scene.js"
+  },
+  "dependencies": {
+    "three": "0.180.0",
+    "ws": "8.18.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  }
+}
