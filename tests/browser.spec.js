@@ -16,6 +16,8 @@ test('movement snapshots reuse graphics resources and remove departed objects',a
   const canvas=document.createElement('canvas');document.body.append(canvas);
   const view=createScene(canvas),game=createGame('RENDER');
   addPlayer(game,'local','Local');addPlayer(game,'remote','Remote');
+  // Keep camera fixed so frustum-driven lazy GPU uploads do not change the baseline.
+  game.phase='salvage';view.setMode('scanner');
   view.update(snapshot(game),'local');view.frame(0,0);const before=view.stats();
   for(let i=0;i<120;i++){
    game.players.remote.pos[0]=Math.sin(i/10);game.players.local.pos[2]=5+Math.cos(i/10);
