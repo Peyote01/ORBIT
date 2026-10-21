@@ -14,7 +14,7 @@ function connect(create=false,resume=false){
   const m=JSON.parse(e.data);
   if(m.type==='welcome'){id=m.id;token=m.token;sessionStorage.setItem('orbit-token',token);$('lobby').hidden=true;for(const el of ['hud','crew','crosshair','logs','controls'])$(el).hidden=false;toast('Room '+m.code+' — share this code. Click the scene to look around.');}
   if(m.type==='error'){$('status').textContent=m.message;toast(m.message);}
-  if(m.type==='state'){state=m.state;view.update(state,id);render();}
+  if(m.type==='state'){const received=performance.now();if(lastSnapshot)snapshotGap=Math.max(snapshotGap,received-lastSnapshot);lastSnapshot=received;snapshotCount++;state=m.state;view.update(state,id);render();}
  };
  socket.onclose=()=>{if(ws===socket)toast('Disconnected. Reload to reconnect; crew seat reserved for 60 seconds.');};
  socket.onerror=()=>{$('status').textContent='Connection failed. Is the game server running?';};
@@ -96,4 +96,17 @@ window.addEventListener('keydown',e=>{
 });
 window.addEventListener('keyup',e=>delete keys[e.code]);window.addEventListener('blur',()=>keys={});
 setInterval(()=>{if(state&&ws?.readyState===1)ws.send(JSON.stringify({type:'input',x:panel?0:Number(!!keys.KeyD)-Number(!!keys.KeyA),z:panel?0:Number(!!keys.KeyW)-Number(!!keys.KeyS),y:panel?0:Number(!!keys.Space)-Number(!!keys.ControlLeft),yaw,pitch}));},50);
-function animate(){view.frame(yaw,pitch);requestAnimationFrame(animate);}animate();
+const perf=document.createElement('div');perf.id='performance';
+perf.style.cssText='position:fixed;bottom:38px;left:22px;color:#a9c3c9;font:11px monospace;pointer-events:none;background:#0b1824cc;padding:4px 8px';
+document.body.append(perf);
+let frames=0,longFrames=0,lastFrame=performance.now(),lastReport=lastFrame,lastSnapshot=0,snapshotGap=0,snapshotCount=0;
+function animate(){
+ const now=performance.now(),gap=now-lastFrame;lastFrame=now;frames++;if(gap>50)longFrames++;
+ view.frame(yaw,pitch);
+ if(now-lastReport>=1000){
+  perf.textContent='motion v2 · '+Math.round(frames*1000/(now-lastReport))+' FPS · stalls >50ms: '+longFrames+' · updates '+snapshotCount+'/s · longest gap '+Math.round(snapshotGap)+'ms';
+  frames=0;longFrames=0;snapshotCount=0;snapshotGap=0;lastReport=now;
+ }
+ requestAnimationFrame(animate);
+}
+animate();

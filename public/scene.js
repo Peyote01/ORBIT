@@ -1,3 +1,4 @@
+import {MotionTrack} from './motion.js';
 import * as T from '/vendor/three.module.js';
 import {STATIONS,GOODS,holdDimensions} from '/shared/game.js';
 export function createScene(canvas){
@@ -30,7 +31,8 @@ export function createScene(canvas){
 
  const dynamic=new T.Group();scene.add(dynamic);
  let last=null,me=null,mode=null,previousFrame=performance.now(),width=0,height=0,pixelRatio=0;
- const entries=new Map(),target=new T.Vector3();
+ const entries=new Map(),cameraTrack=new MotionTrack(),sampled=[0,0,0];
+ let receivedAt=0,epoch=null;
  let generation=0,created=0,disposed=0;
  function dispose(root){root.traverse(o=>{o.geometry?.dispose();if(o.material){o.material.map?.dispose();o.material.dispose();}});root.removeFromParent();disposed++;}
  function keep(key,shape,build,pos=[0,0,0],smooth=false){
@@ -38,14 +40,17 @@ export function createScene(canvas){
   if(entry&&entry.shape!==shape){dispose(entry.root);entries.delete(key);entry=null;}
   if(!entry){
    const root=new T.Group();dynamic.add(root);build(root);
-   root.position.set(...pos);entry={root,shape,target:new T.Vector3(...pos),smooth,generation};entries.set(key,entry);created++;
+   root.position.set(...pos);entry={root,shape,target:new T.Vector3(...pos),smooth,generation,track:new MotionTrack()};entries.set(key,entry);created++;
   }
   entry.generation=generation;entry.target.set(...pos);entry.smooth=smooth;
+  if(smooth)entry.track.push(receivedAt,pos,epoch);
   if(!smooth||entry.root.position.distanceToSquared(entry.target)>100)entry.root.position.copy(entry.target);
   return entry.root;
  }
  function update(s,id){
   last=s;me=s.players.find(p=>p.id===id);generation++;
+  receivedAt=performance.now();epoch=s.code+':'+s.run+':'+id;
+  if(me)cameraTrack.push(receivedAt,me.pos,epoch);
   if(s.wreck&&s.phase==='salvage'&&!s.wreck.crunched&&!s.wreck.crunchAt){
    const w=s.wreck;
    const g=keep('wreck',w.id+':'+w.visual.color+':'+w.visual.thrusters,root=>{
@@ -89,10 +94,9 @@ export function createScene(canvas){
    renderer.setPixelRatio(ratio);renderer.setSize(width,height,false);
    camera.aspect=width/height;camera.updateProjectionMatrix();
   }
-  const blend=1-Math.exp(-18*dt);
-  for(const entry of entries.values())if(entry.smooth)entry.root.position.lerp(entry.target,blend);
+  for(const entry of entries.values())if(entry.smooth){entry.track.sample(now,sampled);entry.root.position.set(...sampled);}
   if(mode==='scanner'&&last?.phase==='salvage'){camera.position.set(0,10,-13);camera.lookAt(0,0,-32);}
-  else if(me){target.set(me.pos[0],me.pos[1]+1.65,me.pos[2]);camera.position.lerp(target,1-Math.exp(-35*dt));camera.rotation.set(pitch,yaw,0,'YXZ');}
+  else if(me){cameraTrack.sample(now,sampled);camera.position.set(sampled[0],sampled[1]+1.65,sampled[2]);camera.rotation.set(pitch,yaw,0,'YXZ');}
   else{camera.position.set(21,14,24);camera.lookAt(0,0,-5);}
   renderer.render(scene,camera);
  }

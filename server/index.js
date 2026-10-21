@@ -6,7 +6,7 @@ import {WebSocketServer,WebSocket} from 'ws';
 import {createGame,addPlayer,leavePlayer,act,setInput,tick,snapshot} from '../shared/game.js';
 export function startServer(port=Number(process.env.PORT)||3000){
  const rooms=new Map(),sessions=new Map();
- const routes={'/':'public/index.html','/client.js':'public/client.js','/scene.js':'public/scene.js','/style.css':'public/style.css','/shared/game.js':'shared/game.js','/vendor/three.module.js':'node_modules/three/build/three.module.js','/vendor/three.core.js':'node_modules/three/build/three.core.js'};
+ const routes={'/':'public/index.html','/client.js':'public/client.js','/scene.js':'public/scene.js','/motion.js':'public/motion.js','/style.css':'public/style.css','/shared/game.js':'shared/game.js','/vendor/three.module.js':'node_modules/three/build/three.module.js','/vendor/three.core.js':'node_modules/three/build/three.core.js'};
  const server=http.createServer(async(req,res)=>{
   const path=new URL(req.url,'http://localhost').pathname;
   if(path==='/health'){res.writeHead(200,{'Content-Type':'application/json'});return res.end(JSON.stringify({ok:true,rooms:rooms.size}));}
@@ -65,7 +65,7 @@ export function startServer(port=Number(process.env.PORT)||3000){
    tick(g,.05);
    if(!Object.values(g.players).some(p=>p.connected)){g.emptySince??=g.time;if(g.time-g.emptySince>300){rooms.delete(code);for(const [t,x]of sessions)if(x.code===code)sessions.delete(t);continue;}}
    else g.emptySince=null;
-   if(steps%2===0){const message={type:'state',state:snapshot(g)};for(const x of sessions.values())if(x.code===code&&x.ws)send(x.ws,message);}
+   {const message={type:'state',state:snapshot(g)};for(const x of sessions.values())if(x.code===code&&x.ws)send(x.ws,message);}
   }steps++;
  },50);
  server.listen(port,'0.0.0.0');
