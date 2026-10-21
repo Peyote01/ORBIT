@@ -1,7 +1,7 @@
 import * as T from '/vendor/three.module.js';
 import {STATIONS,GOODS,holdDimensions} from '/shared/game.js';
 export function createScene(canvas){
- const renderer=new T.WebGLRenderer({canvas,antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+ const renderer=new T.WebGLRenderer({canvas,antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
  const scene=new T.Scene();scene.background=new T.Color(0x050c16);scene.fog=new T.Fog(0x050c16,80,180);
  const camera=new T.PerspectiveCamera(75,1,.1,500);camera.rotation.order='YXZ';
  scene.add(new T.HemisphereLight(0x9dc9ef,0x35454c,2.6));const sun=new T.DirectionalLight(0xffddab,3);sun.position.set(12,25,10);scene.add(sun);
@@ -27,19 +27,35 @@ export function createScene(canvas){
  const stars=new T.BufferGeometry(),v=[];for(let i=0;i<1500;i++){const a=Math.random()*Math.PI*2,z=Math.random()*2-1,r=160;v.push(Math.cos(a)*Math.sqrt(1-z*z)*r,z*r,Math.sin(a)*Math.sqrt(1-z*z)*r);}
  stars.setAttribute('position',new T.Float32BufferAttribute(v,3));scene.add(new T.Points(stars,new T.PointsMaterial({color:0xb5d0ef,size:.25})));
  const planet=new T.Mesh(new T.SphereGeometry(24,32,20),material(0x234455));planet.position.set(-65,-25,-95);scene.add(planet);
- const dynamic=new T.Group();scene.add(dynamic);let signature='',last=null,me=null,mode=null;
- function clear(){dynamic.traverse(o=>{o.geometry?.dispose();if(o.material){o.material.map?.dispose();o.material.dispose();}});dynamic.clear();}
+
+ const dynamic=new T.Group();scene.add(dynamic);
+ let last=null,me=null,mode=null,previousFrame=performance.now(),width=0,height=0,pixelRatio=0;
+ const entries=new Map(),target=new T.Vector3();
+ let generation=0,created=0,disposed=0;
+ function dispose(root){root.traverse(o=>{o.geometry?.dispose();if(o.material){o.material.map?.dispose();o.material.dispose();}});root.removeFromParent();disposed++;}
+ function keep(key,shape,build,pos=[0,0,0],smooth=false){
+  let entry=entries.get(key);
+  if(entry&&entry.shape!==shape){dispose(entry.root);entries.delete(key);entry=null;}
+  if(!entry){
+   const root=new T.Group();dynamic.add(root);build(root);
+   root.position.set(...pos);entry={root,shape,target:new T.Vector3(...pos),smooth,generation};entries.set(key,entry);created++;
+  }
+  entry.generation=generation;entry.target.set(...pos);entry.smooth=smooth;
+  if(!smooth||entry.root.position.distanceToSquared(entry.target)>100)entry.root.position.copy(entry.target);
+  return entry.root;
+ }
  function update(s,id){
-  last=s;me=s.players.find(p=>p.id===id);
-  const sig=JSON.stringify([s.cargo,s.players.map(p=>[p.id,p.pos,p.hp,p.connected]),s.wreck,s.phase,s.ship.containers]);
-  if(sig===signature)return;signature=sig;clear();
+  last=s;me=s.players.find(p=>p.id===id);generation++;
   if(s.wreck&&s.phase==='salvage'&&!s.wreck.crunched&&!s.wreck.crunchAt){
-   const w=s.wreck,g=new T.Group();g.position.set(0,0,-32);g.rotation.y=w.yaw;dynamic.add(g);
-   box(g,[0,-.25,0],[12,.5,14],0x36464c);box(g,[0,2,-6],[12,4,.35],w.visual.color);
-   for(const x of [-6,6]){box(g,[x,1,0],[.4,2,13],w.visual.color);box(g,[x,3,0],[.2,.2,13],0x708186);}
-   const count=w.visual.thrusters||2;for(let i=0;i<count;i++)box(g,[-4+i*8/Math.max(1,count-1),1,7],[1.4,1.4,2],0x476a80);
-   label(g,w.owner,[0,4,0],'#e6b963',5);
-   if(w.rivalHP>0){box(dynamic,[15,2,-35],[6,3,9],0x75545b);label(dynamic,'RIVAL VESSEL',[15,5,-35],'#ef7d7d',4);}
+   const w=s.wreck;
+   const g=keep('wreck',w.id+':'+w.visual.color+':'+w.visual.thrusters,root=>{
+    box(root,[0,-.25,0],[12,.5,14],0x36464c);box(root,[0,2,-6],[12,4,.35],w.visual.color);
+    for(const x of [-6,6]){box(root,[x,1,0],[.4,2,13],w.visual.color);box(root,[x,3,0],[.2,.2,13],0x708186);}
+    const count=w.visual.thrusters||2;for(let i=0;i<count;i++)box(root,[-4+i*8/Math.max(1,count-1),1,7],[1.4,1.4,2],0x476a80);
+   },[0,0,-32]);
+   g.rotation.y=w.yaw;
+   keep('wreck-label',w.owner,root=>label(root,w.owner,[0,0,0],'#e6b963',5),[0,4,-32]);
+   if(w.rivalHP>0)keep('rival','rival',root=>{box(root,[0,0,0],[6,3,9],0x75545b);label(root,'RIVAL VESSEL',[0,3,0],'#ef7d7d',4);},[15,2,-35]);
   }
   for(const c of s.cargo){
    let pos=c.pos,dims=c.dims;
@@ -47,22 +63,38 @@ export function createScene(canvas){
     const b=s.ship.containers.find(b=>b.id===c.container),i=s.ship.containers.indexOf(b);dims=c.packedDims;
     pos=[(i===0?-b.dims[0]:0)+c.cell[0]+dims[0]/2,c.cell[1]+dims[1]/2,c.cell[2]+dims[2]/2];
    }else{pos=[...pos];pos[1]+=dims[1]/2;if(c.state==='held'&&c.carrier===id)continue;}
-   const m=box(dynamic,pos,dims.map(n=>n*.96),GOODS[c.type].color);
-   const edge=new T.LineSegments(new T.EdgesGeometry(m.geometry),new T.LineBasicMaterial({color:c.illegal?0xf46e72:0x15232d}));m.add(edge);
+   keep('cargo:'+c.id,c.type+':'+dims.join(',')+':'+c.illegal,root=>{
+    const m=box(root,[0,0,0],dims.map(n=>n*.96),GOODS[c.type].color);
+    m.add(new T.LineSegments(new T.EdgesGeometry(m.geometry),new T.LineBasicMaterial({color:c.illegal?0xf46e72:0x15232d})));
+   },pos,c.state==='held');
   }
   for(const b of s.ship.containers){
-   const d=holdDimensions(b),i=s.ship.containers.indexOf(b);
-   label(dynamic,b.name+' '+(d[0]*d[1]*d[2])+'m³'+(b.shield?' SHIELDED':''),[i===0?-1.5:1.5,4.5,2],b.shield?'#a295ef':'#9bcac0',2.6);
+   const d=holdDimensions(b),i=s.ship.containers.indexOf(b),text=b.name+' '+(d[0]*d[1]*d[2])+'m³'+(b.shield?' SHIELDED':'');
+   keep('bay:'+b.id,text,root=>label(root,text,[0,0,0],b.shield?'#a295ef':'#9bcac0',2.6),[i===0?-1.5:1.5,4.5,2]);
   }
-  for(const p of s.players)if(p.id!==id&&p.connected){box(dynamic,[p.pos[0],p.pos[1]+.8,p.pos[2]],[.55,1.6,.55],0xcca35e);label(dynamic,p.name,[p.pos[0],p.pos[1]+2,p.pos[2]],'#e6d1ab',1.7);}
-  for(const e of s.wreck?.enemies||[])if(e.hp>0){box(dynamic,[e.pos[0],e.pos[1]+.7,e.pos[2]],[.8,1.4,.8],e.kind==='creature'?0xa075aa:0xc36561);label(dynamic,e.kind+' '+e.hp,[e.pos[0],2.3,e.pos[2]],'#ef8585',2);}
+  for(const p of s.players)if(p.id!==id&&p.connected){
+   keep('player:'+p.id,p.name,root=>{box(root,[0,.8,0],[.55,1.6,.55],0xcca35e);label(root,p.name,[0,2,0],'#e6d1ab',1.7);},p.pos,true);
+  }
+  for(const e of s.wreck?.enemies||[])if(e.hp>0){
+   keep('enemy:'+e.id,e.kind,root=>box(root,[0,.7,0],[.8,1.4,.8],e.kind==='creature'?0xa075aa:0xc36561),e.pos,true);
+   keep('enemy-label:'+e.id,e.kind+e.hp,root=>label(root,e.kind+' '+e.hp,[0,2.3,0],'#ef8585',2),e.pos,true);
+  }
+  for(const [key,entry]of entries)if(entry.generation!==generation){dispose(entry.root);entries.delete(key);}
  }
  function frame(yaw,pitch){
-  renderer.setSize(innerWidth,innerHeight,false);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+  const now=performance.now(),dt=Math.min(.1,(now-previousFrame)/1000);previousFrame=now;
+  const ratio=Math.min(devicePixelRatio,1.5);
+  if(width!==innerWidth||height!==innerHeight||pixelRatio!==ratio){
+   width=innerWidth;height=innerHeight;pixelRatio=ratio;
+   renderer.setPixelRatio(ratio);renderer.setSize(width,height,false);
+   camera.aspect=width/height;camera.updateProjectionMatrix();
+  }
+  const blend=1-Math.exp(-18*dt);
+  for(const entry of entries.values())if(entry.smooth)entry.root.position.lerp(entry.target,blend);
   if(mode==='scanner'&&last?.phase==='salvage'){camera.position.set(0,10,-13);camera.lookAt(0,0,-32);}
-  else if(me){const target=new T.Vector3(me.pos[0],me.pos[1]+1.65,me.pos[2]);camera.position.lerp(target,.45);camera.rotation.set(pitch,yaw,0,'YXZ');}
+  else if(me){target.set(me.pos[0],me.pos[1]+1.65,me.pos[2]);camera.position.lerp(target,1-Math.exp(-35*dt));camera.rotation.set(pitch,yaw,0,'YXZ');}
   else{camera.position.set(21,14,24);camera.lookAt(0,0,-5);}
   renderer.render(scene,camera);
  }
- return {update,frame,setMode:m=>mode=m};
+ return {update,frame,setMode:m=>mode=m,stats:()=>({created,disposed,objects:entries.size,geometries:renderer.info.memory.geometries,textures:renderer.info.memory.textures})};
 }

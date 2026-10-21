@@ -20,13 +20,15 @@ function connect(create=false,resume=false){
  socket.onerror=()=>{$('status').textContent='Connection failed. Is the game server running?';};
 }
 $('create').onclick=()=>connect(true);$('join').onclick=()=>connect(false);if(token)connect(false,true);
-function openPanel(key){panel=key;$('panel').hidden=!key;view.setMode(key);if(key)document.exitPointerLock();renderPanel();}
+function openPanel(key){panel=key;$('panel').hidden=!key;view.setMode(key);if(key)document.exitPointerLock();htmlCache.delete('panel');renderPanel();}
 const btn=(label,type,data={})=>'<button data-action="'+type+'" data-json="'+esc(JSON.stringify(data))+'">'+esc(label)+'</button>';
+const htmlCache=new Map();
+function setHTML(id,html){if(htmlCache.get(id)!==html){$(id).innerHTML=html;htmlCache.set(id,html);}}
 function render(){
  const p=me();if(!p)return;
- $('hud').innerHTML='<strong>ORBIT / '+esc(state.code)+'</strong><span>CREW <b>'+state.players.filter(p=>p.connected).length+'/4</b></span><span>₡ <b>'+state.credits+'</b></span><span>FUEL '+state.ship.fuel+'/'+state.ship.maxFuel+'</span><span>HULL '+state.ship.hull+'/'+state.ship.maxHull+'</span><span>DAY <b>'+state.quota.days+'/'+state.quota.limit+'</b> · QUOTA ₡'+state.quota.amount+(state.quota.due?' · PAYMENT DUE':'')+'</span>';
- $('crew').innerHTML=state.players.map(p=>esc(p.name)+(p.id===state.captain?' ★':'')+' · '+(p.connected?p.hp+' HP':'offline')).join('<br>')+'<br><br>'+state.phase.toUpperCase()+' / '+esc(state.location)+(state.encounter?'<br>'+state.encounter.type.toUpperCase()+' · '+state.encounter.stage+'<br>'+Math.max(0,Math.ceil((state.encounter.until||state.time)-state.time))+' sec · HP '+state.encounter.hp:'');
- $('logs').innerHTML=state.log.slice(0,5).map(l=>'<div>'+esc(l.text)+'</div>').join('');
+ setHTML('hud','<strong>ORBIT / '+esc(state.code)+'</strong><span>CREW <b>'+state.players.filter(p=>p.connected).length+'/4</b></span><span>₡ <b>'+state.credits+'</b></span><span>FUEL '+state.ship.fuel+'/'+state.ship.maxFuel+'</span><span>HULL '+state.ship.hull+'/'+state.ship.maxHull+'</span><span>DAY <b>'+state.quota.days+'/'+state.quota.limit+'</b> · QUOTA ₡'+state.quota.amount+(state.quota.due?' · PAYMENT DUE':'')+'</span>');
+ setHTML('crew',state.players.map(p=>esc(p.name)+(p.id===state.captain?' ★':'')+' · '+(p.connected?p.hp+' HP':'offline')).join('<br>')+'<br><br>'+state.phase.toUpperCase()+' / '+esc(state.location)+(state.encounter?'<br>'+state.encounter.type.toUpperCase()+' · '+state.encounter.stage+'<br>'+Math.max(0,Math.ceil((state.encounter.until||state.time)-state.time))+' sec · HP '+state.encounter.hp:''));
+ setHTML('logs',state.log.slice(0,5).map(l=>'<div>'+esc(l.text)+'</div>').join(''));
  $('shutter').hidden=!state.wreck?.crunchAt;
  const near=nearest();$('prompt').textContent=panel?'':p.held?'Carrying '+GOODS[state.cargo.find(c=>c.id===p.held)?.type]?.name+' · E at cargo console to stow · Q drop':near?'E · '+near.label:'Starboard rear airlock → EVA to wreck';
  if(panel&&!$('panel').contains(document.activeElement))renderPanel();
@@ -73,7 +75,7 @@ function renderPanel(){
   html+='<article>'+Object.entries(UPGRADES).map(([key,u])=>btn(u.name+' '+state.ship.upgrades[key]+'/'+u.max+' · ₡'+u.cost*(state.ship.upgrades[key]+1),'upgrade',{key})).join('')+'</article><p>First shield conversion halves bay capacity. Later levels preserve that capacity and halve detection odds again. Empty a bay before conversion.</p>';
   for(const b of state.ship.containers)html+=btn(b.name+' shield L'+(b.shield+1)+' · ₡'+500*2**b.shield,'upgrade',{key:'shield',container:b.id});
  }
- $('panel').innerHTML=html;
+ setHTML('panel',html);
 }
 function catalog(w){return MODELS.map(m=>{const matched=MODEL_KEYS.filter((k,i)=>w?.clues[k]===m.clues[i]).length;return '<article><strong>'+m.name+'</strong><p>'+m.clues.map(esc).join(' / ')+'<br>'+m.owner+' · estimated ₡'+m.estimate+'<br>'+matched+'/5 matching clues</p>'+((panel==='scanner')?btn('Identify as '+m.name,'guess',{model:m.id}):'')+'</article>';}).join('');}
 $('panel').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.hasAttribute('data-close'))openPanel(null);else if(b.hasAttribute('data-crunch')){b.outerHTML=btn('CONFIRM: destroy contents and crunch','crunch');}else if(b.dataset.action)action(b.dataset.action,JSON.parse(b.dataset.json||'{}'));};
