@@ -1,6 +1,6 @@
 import {MotionTrack} from './motion.js';
 import * as T from '/vendor/three.module.js';
-import {STATIONS,GOODS,holdDimensions,tractorSlot,REAR_HATCH} from '/shared/game.js';
+import {STATIONS,GOODS,holdDimensions,tractorSlot,REAR_HATCH,rearHatchHeight} from '/shared/game.js';
 export function createScene(canvas){
  const renderer=new T.WebGLRenderer({canvas,antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
  const scene=new T.Scene();scene.background=new T.Color(0x050c16);scene.fog=new T.Fog(0x050c16,80,180);
@@ -18,9 +18,11 @@ export function createScene(canvas){
  // Two powered bulkhead doors retract sideways to clear the full aft loading bay.
  const hatchDoors=[];
  let hatchProgress=0;
- box(ship,[-4.35,1.65,REAR_HATCH.z],[.32,3.35,.45],0xe0ae52);
- box(ship,[4.35,1.65,REAR_HATCH.z],[.32,3.35,.45],0xe0ae52);
- box(ship,[0,3.27,REAR_HATCH.z],[8.9,.28,.5],0x536e7b);
+ const hatchPosts=[
+  box(ship,[-4.35,1.65,REAR_HATCH.z],[.32,3.35,.45],0xe0ae52),
+  box(ship,[4.35,1.65,REAR_HATCH.z],[.32,3.35,.45],0xe0ae52)
+ ];
+ const hatchCrown=box(ship,[0,3.27,REAR_HATCH.z],[8.9,.28,.5],0x536e7b);
  for(const sign of [-1,1]){
   const assembly=new T.Group();ship.add(assembly);
   assembly.position.set(sign*2.05,0,REAR_HATCH.z);
@@ -152,7 +154,13 @@ export function createScene(canvas){
   const now=performance.now(),dt=Math.min(.1,(now-previousFrame)/1000);previousFrame=now;
   const desired=last?.ship?.hatchOpen?1:0;
   hatchProgress+=(desired-hatchProgress)*Math.min(1,dt*9);
-  for(const {assembly,sign} of hatchDoors)assembly.position.x=sign*(2.05+4.15*hatchProgress);
+  const hatchHeight=last?.ship?rearHatchHeight(last):REAR_HATCH.height,scale=hatchHeight/REAR_HATCH.height;
+  hatchCrown.position.y=hatchHeight+.07;
+  for(const post of hatchPosts){post.position.y=hatchHeight/2;post.scale.y=scale;}
+  for(const {assembly,sign} of hatchDoors){
+   assembly.position.x=sign*(2.05+4.15*hatchProgress);
+   assembly.scale.y=scale;
+  }
   loadingApron.visible=hatchProgress>.05;
   const ratio=Math.min(devicePixelRatio,1.5);
   if(width!==innerWidth||height!==innerHeight||pixelRatio!==ratio){
