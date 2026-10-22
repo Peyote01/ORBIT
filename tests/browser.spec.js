@@ -46,6 +46,7 @@ test('contracts and room code are accessible; continuous scanner drag allows V',
   await page.goto('http://127.0.0.1:'+app.server.address().port);
   await page.getByRole('button',{name:'START A CREW'}).click();
   await expect(page.locator('#room-code')).toHaveText(/^[A-F0-9]{6}$/);
+  await expect(page.locator('#room-code')).not.toHaveText('');
   const code=await page.locator('#room-code').innerText(),s=app.rooms.get(code),id=s.captain;
   await page.getByRole('button',{name:'Copy code',exact:true}).click();
   expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(code);
