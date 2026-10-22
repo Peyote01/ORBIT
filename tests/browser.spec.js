@@ -131,3 +131,26 @@ test('rear cargo hatch toggles for the crew and its status is visible in the HUD
   expect(errors).toEqual([]);
  }finally{await context.close();await app.close();}
 });
+
+test('green cargo placement magnetically locks hovering freight using E in the browser',async({browser})=>{
+ const {startServer}=await import('../server/index.js');
+ const {once}=await import('node:events');
+ const app=startServer(0);await once(app.server,'listening');
+ const context=await browser.newContext(),page=await context.newPage(),errors=[];
+ page.on('pageerror',e=>errors.push(e.message));
+ try{
+  await page.goto('http://127.0.0.1:'+app.server.address().port);
+  await page.getByRole('button',{name:'START A CREW'}).click();
+  await expect(page.locator('#room-code')).toHaveText(/^[A-F0-9]{6}$/);
+  const code=await page.locator('#room-code').innerText(),s=app.rooms.get(code),p=s.players[s.captain];
+  s.phase='salvage';p.pos=[1,0,5];
+  const c={id:'magnetic-browser',type:'machinery',dims:[2,1,2],pos:[1.15,1.35,5.1],angle:.3,state:'tractored',carrier:p.id};
+  s.cargo.push(c);
+  p.tractor={id:c.id,distance:4,targetDistance:4,angle:c.angle,targetAngle:c.angle};
+  await expect(page.locator('#placement')).toContainText('GREEN GRID');
+  await page.keyboard.press('e');
+  await expect.poll(()=>c.state).toBe('secured');
+  expect(c.cell[1]).toBe(0);
+  expect(errors).toEqual([]);
+ }finally{await context.close();await app.close();}
+});

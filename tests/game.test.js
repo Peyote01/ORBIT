@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createGame,addPlayer,leavePlayer,act,tick,STATIONS,settleQuota,holdDimensions,policeScan,detectionChance,fits,destroyShip,setInput,scrapCrates,volume,cargoValue,cargoPrice,tractorSlot,REAR_HATCH,onShip,snapshot,makeShip,rearHatchHeight} from '../shared/game.js';
+import {createGame,addPlayer,leavePlayer,act,tick,STATIONS,settleQuota,holdDimensions,policeScan,detectionChance,fits,destroyShip,setInput,scrapCrates,volume,cargoValue,cargoPrice,tractorSlot,cargoMoveValid,REAR_HATCH,onShip,snapshot,makeShip,rearHatchHeight} from '../shared/game.js';
 function game(){const s=createGame('TEST',()=>.99);addPlayer(s,'p','Captain');return s;}
 function at(s,key){s.players.p.pos=[...STATIONS[key]];}
 function advance(s,n){for(let i=0;i<n*20;i++)tick(s,.05);}
@@ -104,7 +104,7 @@ test('tractor can snap crates to grid; blocked and rotated placement is rejected
  act(s,'p',{type:'tractorAttach',id:c.id});
  p.pos=[1.5,0,3];c.pos=[1.5,0,1.5];c.angle=.8;
  assert.equal(tractorSlot(s,c).valid,false);
- assert.throws(()=>act(s,'p',{type:'tractorSecure'}),/green grid/);
+ assert.throws(()=>act(s,'p',{type:'tractorSecure'}),/green floor\/grid slot/);
  c.angle=0;assert.equal(tractorSlot(s,c).valid,true);
  act(s,'p',{type:'tractorSecure'});
  assert.equal(c.state,'secured');assert.equal(c.container,'bay1');assert.equal(p.tractor,null);
@@ -198,4 +198,45 @@ test('upgraded ship hatch admits full-size reactor crate and grid can secure it'
  const slot=tractorSlot(s,c);assert.equal(slot?.valid,true);
  act(s,'p',{type:'tractorSecure'});
  assert.equal(c.state,'secured');assert.equal(c.container,'bay0');
+});
+
+test('wide freight clears ENTIRE rear hatch, including the trailing edge',()=>{
+ const s=game(),c={id:'test-large',type:'machinery',dims:[3,2,4],angle:0,state:'loose',pos:[0,0,14]};
+ s.ship.hatchOpen=true;
+ // 4 m deep crate: previously the front entered but center stalled near z=8.15.
+ for(let z=14;z>6.5;z-=.1)
+  assert.equal(cargoMoveValid(s,c,[0,0,z],[0,0,z-.1]),true,'Crate stuck at z='+z.toFixed(2));
+ s.ship.hatchOpen=false;
+ assert.equal(cargoMoveValid(s,c,[0,0,11.9],[0,0,11.7]),false,'Closed aft door blocks a crossing');
+ s.ship.hatchOpen=true;
+ assert.equal(cargoMoveValid(s,c,[4,0,10.4],[4,0,10.2]),false,'Full crate must fit frame width');
+ assert.equal(cargoMoveValid(s,c,[0,0,-10.1],[0,0,-10.6]),false,'Open aft hatch must never let cargo exit through sealed bow');
+ s.ship.hatchOpen=false;
+ assert.equal(cargoMoveValid(s,c,[0,0,6],[0,0,5.9]),true,'Already-loaded cargo can move within the hold');
+});
+test('magnetic floor snap accepts a hovering, slightly rotated crate with a single E',()=>{
+ const s=game(),p=s.players.p;
+ s.phase='salvage';p.pos=[1,0,5];
+ const c={id:'hover',type:'machinery',dims:[2,1,2],pos:[1.15,1.35,5.1],state:'tractored',carrier:'p',angle:.4};
+ s.cargo.push(c);p.tractor={id:c.id};
+ const slot=tractorSlot(s,c);
+ assert.equal(slot?.valid,true,'Floor magnetic field finds a supported nearby grid slot');
+ assert.equal(slot.cell[1],0,'Floor should beat unsupported midair placement');
+ act(s,'p',{type:'tractorSecure'});
+ assert.equal(c.state,'secured');assert.equal(c.cell[1],0);assert.equal(p.tractor,null);
+ assert.equal(c.container,'bay1');
+});
+test('floor snapping requires crate completely inside and never overlaps occupied cargo',()=>{
+ const s=game(),p=s.players.p;
+ s.phase='salvage';p.pos=[1,0,5];
+ const c={id:'external',type:'machinery',dims:[2,1,2],pos:[1,1.1,10.0],state:'tractored',carrier:'p',angle:0};
+ s.cargo.push(c);p.tractor={id:c.id};
+ assert.equal(tractorSlot(s,c),null,'Crate straddling aft plane must enter before snapping');
+ assert.throws(()=>act(s,'p',{type:'tractorSecure'}),/entire crate inside/);
+ c.pos=[1,1.35,5.2];
+ assert.equal(tractorSlot(s,c)?.valid,true);
+ s.cargo.push({id:'occupied',type:'machinery',dims:[2,1,2],state:'secured',container:'bay1',cell:[0,0,2],packedDims:[2,1,2],pos:[1,0,3]});
+ const stacked=tractorSlot(s,c);
+ assert.equal(stacked?.valid,true,'Magnetic placement finds a supported position above occupied floor');
+ assert.equal(stacked?.cell[1],1,'Stack above the existing crate rather than overlapping it');
 });

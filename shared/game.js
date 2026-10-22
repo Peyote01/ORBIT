@@ -210,20 +210,21 @@ function releaseTractor(s,p){if(!p.tractor)return;const c=s.cargo.find(c=>c.id==
 const boxDims=c=>{const a=wrapAngle(c.angle||0),x=c.dims[0],z=c.dims[2];return [Math.abs(Math.cos(a))*x+Math.abs(Math.sin(a))*z,c.dims[1],Math.abs(Math.sin(a))*x+Math.abs(Math.cos(a))*z];};
 // Aft opening is a real portal: a crate must physically clear the frame.
 // Side airlock stays available for small salvage and crew EVA.
-function cargoMoveValid(s,c,from,pos){
+export function cargoMoveValid(s,c,from,pos){
  if(!pos.every(finite)||pos[1]<0||pos[1]+c.dims[1]>18||Math.abs(pos[0])>65||pos[2]<-65||pos[2]>30)return false;
  const d=boxDims(c),hx=d[0]/2,hz=d[2]/2;
  const inside=p=>p[0]>-4.4&&p[0]<4.4&&p[2]>-10.4&&p[2]<REAR_HATCH.z;
  const side=p=>p[0]>3.2&&p[0]<6.6&&p[2]>5.5&&p[2]<9.4&&d[0]<=2.2&&d[2]<=3.8&&p[1]+d[1]<=3.3;
- const rear=s.ship.hatchOpen&&
-  Math.abs(pos[0])+hx<=REAR_HATCH.width/2 &&
-  Math.abs(from[0])+hx<=REAR_HATCH.width/2 &&
-  pos[1]+d[1]<=rearHatchHeight(s)&&from[1]+d[1]<=rearHatchHeight(s) &&
-  Math.min(from[2],pos[2])>REAR_HATCH.z-hz-.25;
+ // Allow the WHOLE crate to cross the aft plane. The old center-distance cutoff
+ // became false halfway through a doorway and trapped freight against an invisible wall.
+ const aftSweep=Math.min(from[2]-hz,pos[2]-hz)<REAR_HATCH.z&&Math.max(from[2]+hz,pos[2]+hz)>REAR_HATCH.z;
+ const rear=s.ship.hatchOpen&&aftSweep&&
+  Math.abs(pos[0])+hx<=REAR_HATCH.width/2+.001 &&
+  Math.abs(from[0])+hx<=REAR_HATCH.width/2+.001 &&
+  pos[1]+d[1]<=rearHatchHeight(s)+.001&&from[1]+d[1]<=rearHatchHeight(s)+.001;
  const fromInside=inside(from),toInside=inside(pos);
  if(fromInside!==toInside&&!rear&&!side(from)&&!side(pos))return false;
  // A crate spanning the rear hull intersects the actual closed hatch.
- const aftSweep=Math.min(from[2]-hz,pos[2]-hz)<REAR_HATCH.z&&Math.max(from[2]+hz,pos[2]+hz)>REAR_HATCH.z;
  if(aftSweep&&!rear&&Math.abs(pos[0])<5&&Math.abs(from[0])<5)return false;
  // No cargo may phase through the sealed bow or the remaining ship walls.
  if(toInside){
@@ -246,18 +247,34 @@ function cargoMoveValid(s,c,from,pos){
  }
  return true;
 }
+// Assist a floor/grid drop without teleporting cargo through the ship's hull.
+// E uses the closest supported physical bay cell within a short magnetic radius.
 export function tractorSlot(s,c){
  if(!c||c.state!=='tractored')return null;
- const turn=Math.round((c.angle||0)/(Math.PI/2)),mismatch=Math.abs(wrapAngle((c.angle||0)-turn*Math.PI/2));
+ const d=boxDims(c);
+ const fullyInside=c.pos[0]-d[0]/2>=-4.35&&c.pos[0]+d[0]/2<=4.35&&
+  c.pos[2]-d[2]/2>=-10.35&&c.pos[2]+d[2]/2<=10.35&&
+  c.pos[1]>=0&&c.pos[1]+d[1]<=rearHatchHeight(s)+.1;
+ if(!fullyInside)return null;
+ const quarter=Math.PI/2,turn=Math.round((c.angle||0)/quarter);
+ const mismatch=Math.abs(wrapAngle((c.angle||0)-turn*quarter));
  const dims=Math.abs(turn%2)===1?[c.dims[2],c.dims[1],c.dims[0]]:[...c.dims];
+ const MAX_SNAP=2.6,MAX_ANGLE=.62;
  let best=null;
  for(let i=0;i<s.ship.containers.length;i++){
-  const bay=s.ship.containers[i],origin=i===0?-bay.dims[0]:0;
-  const cell=[Math.round(c.pos[0]-origin-dims[0]/2),Math.round(c.pos[1]),Math.round(c.pos[2]-dims[2]/2)];
-  const pos=[origin+cell[0]+dims[0]/2,cell[1],cell[2]+dims[2]/2],offset=distance(c.pos,pos);
-  if(offset>1.1||c.pos[2]<-1||c.pos[2]>bay.dims[2]+1)continue;
-  const valid=mismatch<.23&&offset<=.65&&fits(s,c,bay.id,cell,dims);
-  if(!best||(valid&&!best.valid)||(valid===best.valid&&offset<best.offset))best={container:bay.id,cell,dims,pos,valid,offset};
+  const bay=s.ship.containers[i],bounds=holdDimensions(bay),origin=i===0?-bay.dims[0]:0;
+  for(let y=0;y<=bounds[1]-dims[1];y++)
+   for(let z=0;z<=bounds[2]-dims[2];z++)
+    for(let x=0;x<=bounds[0]-dims[0];x++){
+     const cell=[x,y,z];
+     if(!fits(s,c,bay.id,cell,dims))continue;
+     const pos=[origin+x+dims[0]/2,y,z+dims[2]/2];
+     const offset=distance(c.pos,pos);
+     if(offset>MAX_SNAP)continue;
+     const valid=mismatch<=MAX_ANGLE,score=offset+y*.12;
+     if(!best||(valid&&!best.valid)||(valid===best.valid&&score<best.score))
+      best={container:bay.id,cell,dims,pos,valid,offset,score};
+    }
  }
  return best;
 }
@@ -361,7 +378,7 @@ export function act(s,id,a){
   assert(p.tractor,'Attach cargo first.');assert(onShip(p),'Move into the cargo hold first.');
   const c=s.cargo.find(c=>c.id===p.tractor.id&&c.carrier===p.id);assert(c,'Tractor attachment lost.');
   assert(distance(p.pos,c.pos)<7,'Move closer to the crate.');
-  const slot=tractorSlot(s,c);assert(slot?.valid,'Move and rotate cargo onto a green grid space.');
+  const slot=tractorSlot(s,c);assert(slot?.valid,'Move the entire crate inside the hold and near a free green floor/grid slot, then press E.');
   c.state='secured';c.container=slot.container;c.cell=slot.cell;c.packedDims=slot.dims;
   c.angle=Math.round(c.angle/(Math.PI/2))*(Math.PI/2);c.carrier=null;p.tractor=null;
   log(s,GOODS[c.type].name+' secured in '+s.ship.containers.find(b=>b.id===slot.container).name+'.');break;
