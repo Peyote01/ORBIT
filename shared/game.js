@@ -68,7 +68,7 @@ export function addPlayer(s,id,name){
  assert(Object.keys(s.players).length<4,'Room has four reserved crew seats.');
  const n=Object.keys(s.players).length;
  s.players[id]={id,name:String(name||'Salvager').replace(/[<>&]/g,'').slice(0,18),pos:[n%2?2.7:-2.7,0,5+n],
- yaw:0,pitch:0,hp:100,stamina:100,sprintExhausted:false,held:null,input:{x:0,z:0,y:0},connected:true,lastSeen:s.time,fireAt:-10};
+ yaw:0,pitch:0,hp:100,stamina:100,sprintExhausted:false,held:null,tractor:null,input:{x:0,z:0,y:0},connected:true,lastSeen:s.time,fireAt:-10};
  s.captain??=id;
  log(s,s.players[id].name+' joined the crew.');
 }
@@ -126,7 +126,7 @@ export function cargoValue(c){return GOODS[c.type].value*(c.type==='scrap'?volum
 export function cargoPrice(s,c,market=s.location){return Math.floor(marketPrice(s,c.type,market)*(c.type==='scrap'?volume(c.dims)/volume(GOODS.scrap.dims):1));}
 function makeCargo(s,type,source,pos,legal=true){
  const g=GOODS[type],c={id:'c'+s.nextId++,type,dims:[...g.dims],source,illegal:!!g.illegal||!legal,
- state:'loose',carrier:null,container:null,cell:null,packedDims:null,pos:[...pos],salvaged:false};
+ state:'loose',carrier:null,container:null,cell:null,packedDims:null,pos:[...pos],angle:0,salvaged:false};
  s.cargo.push(c);return c;
 }
 function spawnWreck(s,lead){
@@ -194,6 +194,44 @@ function beginEncounter(s){
  if(s.quota.days<1||r>0.55)return;
  if(r<0.3){s.encounter={type:'police',stage:'warning',until:s.time+20,hp:100,fine:0,caught:[],nextShot:0};log(s,'POLICE: scan begins in 20 seconds, then runs for 5 seconds.');}
  else{s.encounter={type:'raider',stage:'attack',until:s.time+25,hp:80,fine:0,nextShot:s.time+5};log(s,'RAIDER INTERCEPT. Fire from navigation console, repair, or boost away.');}
+}
+// Tractor cargo has server-owned bottom-center world coordinates.
+const TRACTOR_RANGE=14, TRACTOR_SPEED=18;
+const wrapAngle=a=>Math.atan2(Math.sin(a),Math.cos(a));
+function releaseTractor(s,p){if(!p.tractor)return;const c=s.cargo.find(c=>c.id===p.tractor.id);if(c&&c.state==='tractored'&&c.carrier===p.id){c.state='loose';c.carrier=null;c.pos[1]=Math.max(0,c.pos[1]);}p.tractor=null;}
+const boxDims=c=>{const a=wrapAngle(c.angle||0),x=c.dims[0],z=c.dims[2];return [Math.abs(Math.cos(a))*x+Math.abs(Math.sin(a))*z,c.dims[1],Math.abs(Math.sin(a))*x+Math.abs(Math.cos(a))*z];};
+function cargoMoveValid(s,c,from,pos){
+ if(!pos.every(finite)||pos[1]<0||pos[1]+c.dims[1]>18||Math.abs(pos[0])>65||pos[2]<-65||pos[2]>30)return false;
+ const d=boxDims(c),hx=d[0]/2,hz=d[2]/2,inside=p=>p[0]>-4.4&&p[0]<4.4&&p[2]>-10.4&&p[2]<10.4;
+ const airlock=p=>p[0]>3.4&&p[0]<6.5&&p[2]>5.5&&p[2]<9.4&&d[0]<=2.2&&d[2]<=3.8;
+ if(inside(from)!==inside(pos)&&!airlock(from)&&!airlock(pos))return false;
+ if(inside(pos)&&(pos[0]-hx< -4.35||pos[0]+hx>4.35||pos[2]-hz< -10.35||pos[2]+hz>10.35||pos[1]+d[1]>3.3))return false;
+ for(const o of s.cargo){
+  if(o.id===c.id||!['loose','secured','tractored'].includes(o.state))continue;
+  let op=o.pos,od=boxDims(o);
+  if(o.state==='secured'){
+   const bay=s.ship.containers.find(b=>b.id===o.container);if(!bay)continue;
+   const i=s.ship.containers.indexOf(bay);od=o.packedDims;
+   op=[(i===0?-bay.dims[0]:0)+o.cell[0]+od[0]/2,o.cell[1],o.cell[2]+od[2]/2];
+  }
+  if(Math.abs(pos[0]-op[0])<(d[0]+od[0])/2-.04&&Math.abs(pos[2]-op[2])<(d[2]+od[2])/2-.04&&pos[1]<op[1]+od[1]-.04&&pos[1]+d[1]>op[1]+.04)return false;
+ }
+ return true;
+}
+export function tractorSlot(s,c){
+ if(!c||c.state!=='tractored')return null;
+ const turn=Math.round((c.angle||0)/(Math.PI/2)),mismatch=Math.abs(wrapAngle((c.angle||0)-turn*Math.PI/2));
+ const dims=Math.abs(turn%2)===1?[c.dims[2],c.dims[1],c.dims[0]]:[...c.dims];
+ let best=null;
+ for(let i=0;i<s.ship.containers.length;i++){
+  const bay=s.ship.containers[i],origin=i===0?-bay.dims[0]:0;
+  const cell=[Math.round(c.pos[0]-origin-dims[0]/2),Math.round(c.pos[1]),Math.round(c.pos[2]-dims[2]/2)];
+  const pos=[origin+cell[0]+dims[0]/2,cell[1],cell[2]+dims[2]/2],offset=distance(c.pos,pos);
+  if(offset>1.1||c.pos[2]<-1||c.pos[2]>bay.dims[2]+1)continue;
+  const valid=mismatch<.23&&offset<=.65&&fits(s,c,bay.id,cell,dims);
+  if(!best||offset<best.offset)best={container:bay.id,cell,dims,pos,valid,offset};
+ }
+ return best;
 }
 export function setInput(s,id,input){
  const p=s.players[id];if(!p||!p.connected)return;
