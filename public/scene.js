@@ -1,6 +1,6 @@
 import {MotionTrack} from './motion.js';
 import * as T from '/vendor/three.module.js';
-import {STATIONS,GOODS,holdDimensions} from '/shared/game.js';
+import {STATIONS,GOODS,holdDimensions,tractorSlot} from '/shared/game.js';
 export function createScene(canvas){
  const renderer=new T.WebGLRenderer({canvas,antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
  const scene=new T.Scene();scene.background=new T.Color(0x050c16);scene.fog=new T.Fog(0x050c16,80,180);
@@ -16,6 +16,20 @@ export function createScene(canvas){
  box(ship,[0,-.2,0],[9,.4,21],0x25353d);
  for(const x of [-4.5,4.5]){box(ship,[x,1.5,-2],[.18,3,16],0x28414b,.45);box(ship,[x,1.5,9.7],[.18,3,1],0x28414b,.45);}
  box(ship,[0,1.5,10.4],[9,3,.2],0x253b43);box(ship,[0,.3,-10.4],[9,.6,.2],0x465d69);
+ // Salvage ship: cargo rails, loading zones, structural ribs and industrial work lights.
+ for(const x of [-3.9,-2.3,0,2.3,3.9])box(ship,[x,.08,3],[.09,.12,12],x===0?0xf2b94e:0x677985);
+ for(const z of [-1,1,3,5,7,9])box(ship,[0,.08,z],[8.6,.06,.08],0x8e8f6b);
+ for(const x of [-4.2,4.2])for(const z of [-7,-2,3,8]){
+  box(ship,[x,2.95,z],[.28,.22,.34],0xdda04d);
+  box(ship,[x,2.72,z],[.38,.14,.48],0xffdb83);
+ }
+ for(const z of [-7,0,7]){
+  box(ship,[0,3.22,z],[8.8,.16,.23],0x435866);
+  for(const x of [-4.2,4.2])box(ship,[x,1.5,z],[.24,3,.24],0x536570);
+ }
+ for(const x of [-2.4,2.4])for(const z of [1,4,7])box(ship,[x,.04,z],[.12,.035,1.2],0xe6ac49);
+ box(ship,[4.35,1.5,7.5],[.12,3,3.2],0xc79142,.15);
+ label(ship,'CARGO / TRACTOR ZONE',[0,3.2,4],'#f2c66f',3.8);
  const grid=new T.GridHelper(20,20,0x47616b,0x2d4049);grid.position.y=.015;grid.scale.x=.44;ship.add(grid);
  for(const [key,pos]of Object.entries(STATIONS)){
   if(key==='cargo')continue;
@@ -30,6 +44,8 @@ export function createScene(canvas){
  const planet=new T.Mesh(new T.SphereGeometry(24,32,20),material(0x234455));planet.position.set(-65,-25,-95);scene.add(planet);
 
  const dynamic=new T.Group();scene.add(dynamic);
+ const aimRay=new T.Raycaster();
+ const upAxis=new T.Vector3(0,1,0);
  let last=null,me=null,mode=null,previousFrame=performance.now(),width=0,height=0,pixelRatio=0;
  const entries=new Map(),cameraTrack=new MotionTrack(),sampled=[0,0,0];
  let receivedAt=0,epoch=null;
@@ -68,10 +84,38 @@ export function createScene(canvas){
     const b=s.ship.containers.find(b=>b.id===c.container),i=s.ship.containers.indexOf(b);dims=c.packedDims;
     pos=[(i===0?-b.dims[0]:0)+c.cell[0]+dims[0]/2,c.cell[1]+dims[1]/2,c.cell[2]+dims[2]/2];
    }else{pos=[...pos];pos[1]+=dims[1]/2;if(c.state==='held'&&c.carrier===id)continue;}
-   keep('cargo:'+c.id,c.type+':'+dims.join(',')+':'+c.illegal,root=>{
+   const cargoMesh=keep('cargo:'+c.id,c.type+':'+dims.join(',')+':'+c.illegal,root=>{
     const m=box(root,[0,0,0],dims.map(n=>n*.96),GOODS[c.type].color);
     m.add(new T.LineSegments(new T.EdgesGeometry(m.geometry),new T.LineBasicMaterial({color:c.illegal?0xf46e72:0x15232d})));
-   },pos,c.state==='held');
+   },pos,c.state==='held'||c.state==='tractored');
+   cargoMesh.userData.cargoId=c.id;
+   cargoMesh.userData.targetable=c.state==='loose';
+   cargoMesh.rotation.y=c.state==='secured'?0:(c.angle||0);
+  }
+  for(const p of s.players){
+   if(!p.connected||!p.tractor)continue;
+   const c=s.cargo.find(c=>c.id===p.tractor.id&&c.state==='tractored');if(!c)continue;
+   const beam=keep('tractorbeam:'+p.id,'tractorbeam',root=>{
+    const cylinder=new T.Mesh(new T.CylinderGeometry(.035,.08,1,8),new T.MeshBasicMaterial({color:0x74e4fa,transparent:true,opacity:.8,depthWrite:false}));
+    root.add(cylinder);root.userData.core=cylinder;
+    const glow=new T.PointLight(0x35c8ed,1.7,6);root.add(glow);root.userData.glow=glow;
+   },[0,0,0]);
+   const start=new T.Vector3(p.pos[0],p.pos[1]+1.4,p.pos[2]),end=new T.Vector3(c.pos[0],c.pos[1]+c.dims[1]/2,c.pos[2]);
+   const diff=end.clone().sub(start),length=diff.length();
+   beam.userData.core.position.copy(start).addScaledVector(diff,.5);
+   beam.userData.core.quaternion.setFromUnitVectors(upAxis,diff.normalize());
+   beam.userData.core.scale.set(1,length,1);beam.userData.glow.position.copy(end);
+  }
+  const local=s.players.find(p=>p.id===id);
+  const attached=local?.tractor&&s.cargo.find(c=>c.id===local.tractor.id&&c.state==='tractored');
+  const placement=attached?tractorSlot(s,attached):null;
+  if(placement){
+   const shape=placement.dims.join(',')+':'+placement.valid;
+   keep('gridpreview',shape,root=>{
+    const m=box(root,[0,0,0],placement.dims.map(n=>n*.99),placement.valid?0x53f0a1:0xf46c6c,.22);
+    const wire=new T.LineSegments(new T.EdgesGeometry(m.geometry),new T.LineBasicMaterial({color:placement.valid?0x5bf4a2:0xff7373}));
+    root.add(wire);
+   },[placement.pos[0],placement.pos[1]+placement.dims[1]/2,placement.pos[2]]);
   }
   for(const b of s.ship.containers){
    const d=holdDimensions(b),i=s.ship.containers.indexOf(b),text=b.name+' '+(d[0]*d[1]*d[2])+'m³'+(b.shield?' SHIELDED':'');
@@ -101,5 +145,17 @@ export function createScene(canvas){
   if(scannerYaw!==null&&entries.has('wreck'))entries.get('wreck').root.rotation.y=scannerYaw;
   renderer.render(scene,camera);
  }
- return {update,frame,setScannerYaw:value=>scannerYaw=value,setMode:m=>mode=m,stats:()=>({created,disposed,objects:entries.size,geometries:renderer.info.memory.geometries,textures:renderer.info.memory.textures})};
+ function targetCargo(){
+  aimRay.setFromCamera(new T.Vector2(0,0),camera);
+  aimRay.far=14;
+  const targets=[...entries.values()].filter(e=>e.root.userData.targetable).map(e=>e.root);
+  const hits=aimRay.intersectObjects(targets,true);
+  for(const hit of hits){
+   let node=hit.object;
+   while(node&&!node.userData?.cargoId)node=node.parent;
+   if(node?.userData.targetable)return node.userData.cargoId;
+  }
+  return null;
+ }
+ return {update,frame,targetCargo,setScannerYaw:value=>scannerYaw=value,setMode:m=>mode=m,stats:()=>({created,disposed,objects:entries.size,geometries:renderer.info.memory.geometries,textures:renderer.info.memory.textures})};
 }
