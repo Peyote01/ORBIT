@@ -217,14 +217,14 @@ export function cargoMoveValid(s,c,from,pos){
  const side=p=>p[0]>3.2&&p[0]<6.6&&p[2]>5.5&&p[2]<9.4&&d[0]<=2.2&&d[2]<=3.8&&p[1]+d[1]<=3.3;
  // Allow the WHOLE crate to cross the aft plane. The old center-distance cutoff
  // became false halfway through a doorway and trapped freight against an invisible wall.
- const rear=s.ship.hatchOpen&&
+ const aftSweep=Math.min(from[2]-hz,pos[2]-hz)<REAR_HATCH.z&&Math.max(from[2]+hz,pos[2]+hz)>REAR_HATCH.z;
+ const rear=s.ship.hatchOpen&&aftSweep&&
   Math.abs(pos[0])+hx<=REAR_HATCH.width/2+.001 &&
   Math.abs(from[0])+hx<=REAR_HATCH.width/2+.001 &&
   pos[1]+d[1]<=rearHatchHeight(s)+.001&&from[1]+d[1]<=rearHatchHeight(s)+.001;
  const fromInside=inside(from),toInside=inside(pos);
  if(fromInside!==toInside&&!rear&&!side(from)&&!side(pos))return false;
  // A crate spanning the rear hull intersects the actual closed hatch.
- const aftSweep=Math.min(from[2]-hz,pos[2]-hz)<REAR_HATCH.z&&Math.max(from[2]+hz,pos[2]+hz)>REAR_HATCH.z;
  if(aftSweep&&!rear&&Math.abs(pos[0])<5&&Math.abs(from[0])<5)return false;
  // No cargo may phase through the sealed bow or the remaining ship walls.
  if(toInside){
