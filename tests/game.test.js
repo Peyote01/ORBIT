@@ -235,5 +235,7 @@ test('floor snapping requires crate completely inside and never overlaps occupie
  c.pos=[1,1.35,5.2];
  assert.equal(tractorSlot(s,c)?.valid,true);
  s.cargo.push({id:'occupied',type:'machinery',dims:[2,1,2],state:'secured',container:'bay1',cell:[0,0,2],packedDims:[2,1,2],pos:[1,0,3]});
- assert.equal(tractorSlot(s,c),null,'Occupied floor is not available near this crate');
+ const stacked=tractorSlot(s,c);
+ assert.equal(stacked?.valid,true,'Magnetic placement finds a supported position above occupied floor');
+ assert.equal(stacked?.cell[1],1,'Stack above the existing crate rather than overlapping it');
 });
