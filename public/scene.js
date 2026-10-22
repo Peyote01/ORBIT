@@ -1,6 +1,6 @@
 import {MotionTrack} from './motion.js';
 import * as T from '/vendor/three.module.js';
-import {STATIONS,GOODS,holdDimensions,tractorSlot} from '/shared/game.js';
+import {STATIONS,GOODS,holdDimensions,tractorSlot,REAR_HATCH} from '/shared/game.js';
 export function createScene(canvas){
  const renderer=new T.WebGLRenderer({canvas,antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
  const scene=new T.Scene();scene.background=new T.Color(0x050c16);scene.fog=new T.Fog(0x050c16,80,180);
@@ -15,7 +15,24 @@ export function createScene(canvas){
  const ship=new T.Group();scene.add(ship);
  box(ship,[0,-.2,0],[9,.4,21],0x25353d);
  for(const x of [-4.5,4.5]){box(ship,[x,1.5,-2],[.18,3,16],0x28414b,.45);box(ship,[x,1.5,9.7],[.18,3,1],0x28414b,.45);}
- box(ship,[0,1.5,10.4],[9,3,.2],0x253b43);box(ship,[0,.3,-10.4],[9,.6,.2],0x465d69);
+ // Two powered bulkhead doors retract sideways to clear the full aft loading bay.
+ const hatchDoors=[];
+ let hatchProgress=0;
+ box(ship,[-4.35,1.65,REAR_HATCH.z],[.32,3.35,.45],0xe0ae52);
+ box(ship,[4.35,1.65,REAR_HATCH.z],[.32,3.35,.45],0xe0ae52);
+ box(ship,[0,3.27,REAR_HATCH.z],[8.9,.28,.5],0x536e7b);
+ for(const sign of [-1,1]){
+  const assembly=new T.Group();ship.add(assembly);
+  assembly.position.set(sign*2.05,0,REAR_HATCH.z);
+  box(assembly,[0,1.58,0],[4.07,3.05,.25],0x34505f);
+  box(assembly,[0,2.9,.14],[3.9,.17,.08],0xf0b847);
+  box(assembly,[0,.22,.15],[3.9,.18,.07],0xf0b847);
+  for(let i=0;i<5;i++)box(assembly,[-1.5+i*.75,1.55,.15],[.17,2,.06],i%2?0x233842:0xc59b51);
+  hatchDoors.push({assembly,sign});
+ }
+ const loadingApron=box(ship,[0,-.075,11.8],[8.25,.18,2.8],0x4a5e68);
+  loadingApron.visible=false;
+ box(ship,[0,.3,-10.4],[9,.6,.2],0x465d69);
  // Salvage ship: cargo rails, loading zones, structural ribs and industrial work lights.
  for(const x of [-3.9,-2.3,0,2.3,3.9])box(ship,[x,.08,3],[.09,.12,12],x===0?0xf2b94e:0x677985);
  for(const z of [-1,1,3,5,7,9])box(ship,[0,.08,z],[8.6,.06,.08],0x8e8f6b);
@@ -38,6 +55,7 @@ export function createScene(canvas){
   label(ship,key.toUpperCase(),[pos[0],1.9,pos[2]],'#d2d6c4',1.7);
  }
  label(ship,'AIRLOCK →',[3,2.4,7.8],'#e6b963',2);
+ label(ship,'AFT CARGO HATCH / H TO TOGGLE',[0,3.75,9.9],'#f1c36c',5);
  label(ship,'ORBIT / SALVAGE DIVISION',[0,3,-10],'#e6b963',4);
  const stars=new T.BufferGeometry(),v=[];for(let i=0;i<1500;i++){const a=Math.random()*Math.PI*2,z=Math.random()*2-1,r=160;v.push(Math.cos(a)*Math.sqrt(1-z*z)*r,z*r,Math.sin(a)*Math.sqrt(1-z*z)*r);}
  stars.setAttribute('position',new T.Float32BufferAttribute(v,3));scene.add(new T.Points(stars,new T.PointsMaterial({color:0xb5d0ef,size:.25})));
@@ -132,6 +150,10 @@ export function createScene(canvas){
  }
  function frame(yaw,pitch){
   const now=performance.now(),dt=Math.min(.1,(now-previousFrame)/1000);previousFrame=now;
+  const desired=last?.ship?.hatchOpen?1:0;
+  hatchProgress+=(desired-hatchProgress)*Math.min(1,dt*9);
+  for(const {assembly,sign} of hatchDoors)assembly.position.x=sign*(2.05+4.15*hatchProgress);
+  loadingApron.visible=hatchProgress>.05;
   const ratio=Math.min(devicePixelRatio,1.5);
   if(width!==innerWidth||height!==innerHeight||pixelRatio!==ratio){
    width=innerWidth;height=innerHeight;pixelRatio=ratio;
