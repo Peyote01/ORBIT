@@ -210,6 +210,7 @@ test('wide freight clears ENTIRE rear hatch, including the trailing edge',()=>{
  assert.equal(cargoMoveValid(s,c,[0,0,11.9],[0,0,11.7]),false,'Closed aft door blocks a crossing');
  s.ship.hatchOpen=true;
  assert.equal(cargoMoveValid(s,c,[4,0,10.4],[4,0,10.2]),false,'Full crate must fit frame width');
+ assert.equal(cargoMoveValid(s,c,[0,0,-10.1],[0,0,-10.6]),false,'Open aft hatch must never let cargo exit through sealed bow');
  s.ship.hatchOpen=false;
  assert.equal(cargoMoveValid(s,c,[0,0,6],[0,0,5.9]),true,'Already-loaded cargo can move within the hold');
 });
