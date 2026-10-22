@@ -34,3 +34,43 @@ test('movement snapshots reuse graphics resources and remove departed objects',a
  expect(result.removed.objects).toBe(result.after.objects-1);
  expect(result.removed.disposed).toBe(result.after.disposed+1);
 });
+
+test('contracts and room code are accessible; continuous scanner drag allows V',async({browser})=>{
+ const {startServer}=await import('../server/index.js');
+ const {act,tick,STATIONS}=await import('../shared/game.js');
+ const {once}=await import('node:events');
+ const app=startServer(0);await once(app.server,'listening');
+ const context=await browser.newContext({permissions:['clipboard-read','clipboard-write']});
+ const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+ try{
+  await page.goto('http://127.0.0.1:'+app.server.address().port);
+  await page.getByRole('button',{name:'START A CREW'}).click();
+  await expect(page.locator('#room-code')).toHaveText(/^[A-F0-9]{6}$/);
+  const code=await page.locator('#room-code').innerText(),s=app.rooms.get(code),id=s.captain;
+  await page.getByRole('button',{name:'Copy code',exact:true}).click();
+  expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(code);
+  await page.keyboard.press('c');
+  await expect(page.locator('#panel')).toContainText('Accept contracts anywhere');
+  await page.getByRole('button',{name:'Accept · FREE',exact:true}).first().click();
+  await expect.poll(()=>s.leads[0].accepted).toBe(true);
+  await page.keyboard.press('Escape');
+  s.players[id].pos=[...STATIONS.nav];act(s,id,{type:'travel',id:'free-a'});
+  for(let i=0;i<180;i++)tick(s,.05);
+  s.players[id].pos=[...STATIONS.scanner];
+  await expect(page.locator('#prompt')).toContainText('SCANNER');
+  await page.keyboard.press('e');
+  await page.getByRole('button',{name:'Lock grapple',exact:true}).click();
+  await expect.poll(()=>s.wrecks['free-a'].grapple).toBe(true);
+  await page.mouse.move(800,420);await page.mouse.down();
+  await expect.poll(()=>page.evaluate(()=>!!document.pointerLockElement)).toBe(true);
+  await page.mouse.move(1000,420,{steps:30});
+  await page.keyboard.press('v');
+  await expect.poll(()=>Object.keys(s.wrecks['free-a'].clues).length).toBeGreaterThan(0);
+  const first=s.wrecks['free-a'].yaw;
+  await page.mouse.move(500,420,{steps:30});
+  await expect.poll(()=>s.wrecks['free-a'].yaw).not.toBe(first);
+  await page.mouse.up();
+  await expect.poll(()=>page.evaluate(()=>!!document.pointerLockElement)).toBe(false);
+  expect(errors).toEqual([]);
+ }finally{await context.close();await app.close();}
+});

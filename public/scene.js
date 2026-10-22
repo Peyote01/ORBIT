@@ -33,7 +33,7 @@ export function createScene(canvas){
  let last=null,me=null,mode=null,previousFrame=performance.now(),width=0,height=0,pixelRatio=0;
  const entries=new Map(),cameraTrack=new MotionTrack(),sampled=[0,0,0];
  let receivedAt=0,epoch=null;
- let generation=0,created=0,disposed=0;
+ let generation=0,created=0,disposed=0,scannerYaw=null;
  function dispose(root){root.traverse(o=>{o.geometry?.dispose();if(o.material){o.material.map?.dispose();o.material.dispose();}});root.removeFromParent();disposed++;}
  function keep(key,shape,build,pos=[0,0,0],smooth=false){
   let entry=entries.get(key);
@@ -98,7 +98,8 @@ export function createScene(canvas){
   if(mode==='scanner'&&last?.phase==='salvage'){camera.position.set(0,10,-13);camera.lookAt(0,0,-32);}
   else if(me){cameraTrack.sample(now,sampled);camera.position.set(sampled[0],sampled[1]+1.65,sampled[2]);camera.rotation.set(pitch,yaw,0,'YXZ');}
   else{camera.position.set(21,14,24);camera.lookAt(0,0,-5);}
+  if(scannerYaw!==null&&entries.has('wreck'))entries.get('wreck').root.rotation.y=scannerYaw;
   renderer.render(scene,camera);
  }
- return {update,frame,setMode:m=>mode=m,stats:()=>({created,disposed,objects:entries.size,geometries:renderer.info.memory.geometries,textures:renderer.info.memory.textures})};
+ return {update,frame,setScannerYaw:value=>scannerYaw=value,setMode:m=>mode=m,stats:()=>({created,disposed,objects:entries.size,geometries:renderer.info.memory.geometries,textures:renderer.info.memory.textures})};
 }

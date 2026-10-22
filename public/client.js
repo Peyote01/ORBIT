@@ -2,10 +2,22 @@ import {createScene} from './scene.js';
 import {STATIONS,MODELS,MODEL_KEYS,GOODS,UPGRADES,distance,holdDimensions,volume,facingClue} from '/shared/game.js';
 const $=id=>document.getElementById(id),esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let view;try{view=createScene($('world'));}catch(e){$('status').textContent='WebGL unavailable: '+e.message;throw e;}
-let ws,state,id,token=sessionStorage.getItem('orbit-token'),panel=null,yaw=0,pitch=0,sequence=0,keys={},drag=false,toastTimer;
+let ws,state,id,token=sessionStorage.getItem('orbit-token'),panel=null,yaw=0,pitch=0,sequence=0,keys={},drag=false,toastTimer,rotateDelta=0,rotationId=0,rotationQueue=[],rotationWreck=null;
 const me=()=>state?.players.find(p=>p.id===id);
 function toast(t){$('toast').textContent=t;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').textContent='',5000);}
-function action(type,extra={}){if(ws?.readyState===1)ws.send(JSON.stringify({type:'act',seq:Date.now()+'-'+sequence++,action:{type,...extra}}));}
+function action(type,extra={}){
+ if(ws?.readyState!==1)return null;
+ const seq=Date.now()+'-'+sequence++;ws.send(JSON.stringify({type:'act',seq,action:{type,...extra}}));return seq;
+}
+function flushRotation(){
+ if(!rotateDelta||panel!=='scanner')return;
+ const delta=Math.max(-.15,Math.min(.15,rotateDelta));rotateDelta=0;
+ const n=++rotationId,seq=action('rotate',{delta,rotationId:n});
+ if(seq)rotationQueue.push({id:n,seq,delta});
+}
+function scan(){flushRotation();action('scan');}
+function resetRotation(){rotateDelta=0;rotationQueue=[];drag=false;}
+
 function connect(create=false,resume=false){
  if(ws)ws.close();$('status').textContent='Connecting…';
  const socket=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws');ws=socket;
@@ -13,14 +25,18 @@ function connect(create=false,resume=false){
  socket.onmessage=e=>{
   const m=JSON.parse(e.data);
   if(m.type==='welcome'){id=m.id;token=m.token;sessionStorage.setItem('orbit-token',token);$('lobby').hidden=true;for(const el of ['hud','crew','crosshair','logs','controls'])$(el).hidden=false;toast('Room '+m.code+' — share this code. Click the scene to look around.');}
-  if(m.type==='error'){$('status').textContent=m.message;toast(m.message);}
-  if(m.type==='state'){const received=performance.now();if(lastSnapshot)snapshotGap=Math.max(snapshotGap,received-lastSnapshot);lastSnapshot=received;snapshotCount++;state=m.state;view.update(state,id);render();}
+  if(m.type==='error'){rotationQueue=rotationQueue.filter(r=>r.seq!==m.seq);$('status').textContent=m.message;toast(m.message);}
+  if(m.type==='state'){const received=performance.now();if(lastSnapshot)snapshotGap=Math.max(snapshotGap,received-lastSnapshot);lastSnapshot=received;snapshotCount++;state=m.state;
+   if(rotationWreck!==state.wreck?.id){resetRotation();rotationWreck=state.wreck?.id;}
+   const acknowledged=state.wreck?.rotationAcks?.[id]??-1;
+   rotationQueue=rotationQueue.filter(r=>r.id>acknowledged);
+   view.update(state,id);render();}
  };
  socket.onclose=()=>{if(ws===socket)toast('Disconnected. Reload to reconnect; crew seat reserved for 60 seconds.');};
  socket.onerror=()=>{$('status').textContent='Connection failed. Is the game server running?';};
 }
 $('create').onclick=()=>connect(true);$('join').onclick=()=>connect(false);if(token)connect(false,true);
-function openPanel(key){panel=key;$('panel').hidden=!key;view.setMode(key);if(key)document.exitPointerLock();htmlCache.delete('panel');renderPanel();}
+function openPanel(key){if(panel==='scanner'&&key!=='scanner'){flushRotation();drag=false;document.exitPointerLock();}panel=key;$('panel').hidden=!key;view.setMode(key);if(key)document.exitPointerLock();htmlCache.delete('panel');renderPanel();}
 const btn=(label,type,data={})=>'<button data-action="'+type+'" data-json="'+esc(JSON.stringify(data))+'">'+esc(label)+'</button>';
 const htmlCache=new Map();
 function setHTML(id,html){if(htmlCache.get(id)!==html){$(id).innerHTML=html;htmlCache.set(id,html);}}
@@ -31,7 +47,9 @@ function render(){
  setHTML('logs',state.log.slice(0,5).map(l=>'<div>'+esc(l.text)+'</div>').join(''));
  $('shutter').hidden=!state.wreck?.crunchAt;
  const near=nearest();$('prompt').textContent=panel?'':p.held?'Carrying '+GOODS[state.cargo.find(c=>c.id===p.held)?.type]?.name+' · E at cargo console to stow · Q drop':near?'E · '+near.label:'Starboard rear airlock → EVA to wreck';
- if(panel&&!$('panel').contains(document.activeElement))renderPanel();
+ if(panel)renderPanel();
+ $('room-code').textContent=state.code;$('quick-actions').hidden=false;
+ $('stamina').textContent='STAMINA '+Math.round(p.stamina??100)+'%'+(p.sprintExhausted?' · recovering':'');
 }
 function nearest(){
  const p=me();if(!p)return null;
@@ -41,7 +59,7 @@ function nearest(){
 }
 function renderPanel(){
  if(!panel||!state)return;const p=me(),w=state.wreck;let html='<button data-close>← BACK TO DECK</button><h2>'+panel.toUpperCase()+'</h2>';
- if(panel==='board')html+='<p>Start with free contracts. Purchases use the shared account. Coordinates without rights produce illegal salvage.</p>'+state.leads.map(l=>'<article><strong>'+esc(l.name)+'</strong><p>'+esc(l.owner)+' · '+l.range+' fuel · '+esc(l.threat)+'</p>'+btn(l.accepted?'ACCEPTED':l.cost?'Buy · ₡'+l.cost:'Accept · FREE','accept',{id:l.id})+'</article>').join('');
+ if(panel==='board')html+='<p>Accept contracts anywhere with C. Start with free contracts. Purchases use the shared account. Coordinates without rights produce illegal salvage.</p>'+state.leads.map(l=>'<article><strong>'+esc(l.name)+'</strong><p>'+esc(l.owner)+' · '+l.range+' fuel · '+esc(l.threat)+'</p>'+btn(l.accepted?'ACCEPTED':l.cost?'Buy · ₡'+l.cost:'Accept · FREE','accept',{id:l.id})+'</article>').join('');
  if(panel==='nav'){
   html+='<p>Captain commits travel. All crew must be aboard and crates put down. First station departure each quota is free; subsequent station departures and leaving salvaged wrecks cost one day.</p>';
   for(const target of [{id:'A',name:'Market A · industrial premium'},{id:'B',name:'Market B · technical / restricted'},...state.leads.filter(l=>l.accepted)])html+=btn('Travel: '+target.name,'travel',{id:target.id});
@@ -52,7 +70,7 @@ function renderPanel(){
  if(panel==='scanner'){
   if(!w)html+='<p>Travel to a wreck first.</p>';
   else{
-   html+='<p>Lock grapple, then drag the scene sideways to rotate. V scans the facing component. Three matching components give high confidence; five are certain.</p>'+btn(w.grapple?'Release grapple':'Lock grapple','grapple')+btn('V · Scan '+MODEL_KEYS[facingClue(w)],'scan');
+   html+='<p>Lock grapple, then hold the mouse button on the scene and drag to rotate without screen edges. Press V while dragging to scan. Identification is optional: collect cargo whenever you want. Three matching clues give high confidence; five are certain.</p>'+btn(w.grapple?'Release grapple':'Lock grapple','grapple')+btn('V · Scan '+MODEL_KEYS[facingClue(w)],'scan');
    html+='<article>'+MODEL_KEYS.map(k=>'<p>'+k.toUpperCase()+': <strong>'+esc(w.clues[k]||'UNSCANNED')+'</strong></p>').join('')+'</article>';
    html+=catalog(w);
    html+='<article><p>Crunch destroys all cargo left in the wreck. Return every crew member to the ship first.</p><button data-crunch>CRUNCH WRECK…</button></article>';
@@ -67,7 +85,7 @@ function renderPanel(){
  if(panel==='market'){
   html+='<p>Prices refresh with travel days. A favors industrial goods; B favors technology and accepts prohibited cargo. Sell first, then settle your quota.</p><table><tr><th>Cargo</th><th>A</th><th>B</th></tr>'+Object.entries(GOODS).map(([k,g])=>'<tr><td>'+g.name+'</td><td>'+state.prices.A[k]+'</td><td>'+state.prices.B[k]+'</td></tr>').join('')+'</table>';
   const crates=state.cargo.filter(c=>c.state==='secured');html+=btn('Sell all accepted cargo','sell',{ids:crates.map(c=>c.id)});
-  for(const c of crates)html+=btn('Sell '+GOODS[c.type].name,'sell',{id:c.id});
+  for(const c of crates)html+=btn('Sell '+GOODS[c.type].name+' · '+volume(c.dims)+'m³','sell',{id:c.id});
   if(state.quota.due)html+='<article><p>Settlement deducts ₡'+state.quota.amount+'. If you cannot pay, the ship is repossessed and your account resets to ₡1,000.</p>'+btn('SETTLE QUOTA','settle')+btn('Use ship extension · +7 days','extend')+'</article>';
  }
  if(panel==='engineering'){
@@ -78,35 +96,60 @@ function renderPanel(){
  setHTML('panel',html);
 }
 function catalog(w){return MODELS.map(m=>{const matched=MODEL_KEYS.filter((k,i)=>w?.clues[k]===m.clues[i]).length;return '<article><strong>'+m.name+'</strong><p>'+m.clues.map(esc).join(' / ')+'<br>'+m.owner+' · estimated ₡'+m.estimate+'<br>'+matched+'/5 matching clues</p>'+((panel==='scanner')?btn('Identify as '+m.name,'guess',{model:m.id}):'')+'</article>';}).join('');}
-$('panel').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.hasAttribute('data-close'))openPanel(null);else if(b.hasAttribute('data-crunch')){b.outerHTML=btn('CONFIRM: destroy contents and crunch','crunch');}else if(b.dataset.action)action(b.dataset.action,JSON.parse(b.dataset.json||'{}'));};
+$('panel').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.hasAttribute('data-close'))openPanel(null);else if(b.hasAttribute('data-crunch')){b.outerHTML=btn('CONFIRM: destroy contents and crunch','crunch');}else if(b.dataset.action==='scan')scan();else if(b.dataset.action)action(b.dataset.action,JSON.parse(b.dataset.json||'{}'));};
+
 $('world').onclick=()=>{if(state&&!panel)$('world').requestPointerLock();};
-$('world').onmousedown=e=>{if(panel==='scanner')drag=true;};
-window.addEventListener('mouseup',()=>drag=false);
+$('world').addEventListener('pointerdown',e=>{
+ if(panel!=='scanner'||e.button!==0)return;
+ e.preventDefault();drag=true;$('world').setPointerCapture(e.pointerId);
+ const request=$('world').requestPointerLock();
+ request?.catch(()=>toast('Cursor capture unavailable. Drag remains active until release.'));
+});
+window.addEventListener('pointerup',e=>{
+ if(!drag)return;flushRotation();drag=false;
+ if($('world').hasPointerCapture(e.pointerId))$('world').releasePointerCapture(e.pointerId);
+ if(panel==='scanner')document.exitPointerLock();
+});
+window.addEventListener('pointercancel',()=>{drag=false;rotateDelta=0;});
+document.addEventListener('pointerlockchange',()=>{if(!document.pointerLockElement)drag=false;});
 window.addEventListener('mousemove',e=>{
- if(drag&&panel==='scanner')action('rotate',{delta:e.movementX*.005});
- else if(document.pointerLockElement){yaw-=e.movementX*.002;pitch=Math.max(-1.4,Math.min(1.4,pitch-e.movementY*.002));}
+ if(drag&&panel==='scanner'){
+  rotateDelta=Math.max(-.15,Math.min(.15,rotateDelta+e.movementX*.005));
+ }else if(document.pointerLockElement&&!panel){
+  yaw-=e.movementX*.002;pitch=Math.max(-1.4,Math.min(1.4,pitch-e.movementY*.002));
+ }
 });
 window.addEventListener('keydown',e=>{
  if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))return;
  keys[e.code]=true;if(['Space','Tab'].includes(e.code))e.preventDefault();if(e.repeat)return;
  if(e.code==='Escape'){openPanel(null);keys={};}
  if(e.code==='KeyE'){if(panel){openPanel(null);return;}const n=nearest();if(n?.cargo)action('pickup',{id:n.cargo});else if(n)openPanel(n.key);}
- if(e.code==='KeyQ')action('drop');if(e.code==='KeyV')action('scan');
+ if(e.code==='KeyC')openPanel(panel==='board'?null:'board');
+ if(e.code==='KeyQ')action('drop');if(e.code==='KeyV'){e.preventDefault();scan();}
  if(e.code==='KeyF'){if(panel==='nav')action('shipfire');else{const p=me();const targets=(state?.wreck?.enemies||[]).filter(e=>e.hp>0).sort((a,b)=>distance(a.pos,p.pos)-distance(b.pos,p.pos));if(targets[0])action('shoot',{id:targets[0].id});}}
 });
-window.addEventListener('keyup',e=>delete keys[e.code]);window.addEventListener('blur',()=>keys={});
-setInterval(()=>{if(state&&ws?.readyState===1)ws.send(JSON.stringify({type:'input',x:panel?0:Number(!!keys.KeyD)-Number(!!keys.KeyA),z:panel?0:Number(!!keys.KeyW)-Number(!!keys.KeyS),y:panel?0:Number(!!keys.Space)-Number(!!keys.ControlLeft),yaw,pitch}));},50);
+window.addEventListener('keyup',e=>delete keys[e.code]);window.addEventListener('blur',()=>{keys={};drag=false;rotateDelta=0;});
+setInterval(()=>{flushRotation();if(state&&ws?.readyState===1)ws.send(JSON.stringify({type:'input',x:panel?0:Number(!!keys.KeyD)-Number(!!keys.KeyA),z:panel?0:Number(!!keys.KeyW)-Number(!!keys.KeyS),y:panel?0:Number(!!keys.Space)-Number(!!keys.ControlLeft),sprint:!panel&&(!!keys.ShiftLeft||!!keys.ShiftRight),yaw,pitch}));},50);
 const perf=document.createElement('div');perf.id='performance';
 perf.style.cssText='position:fixed;bottom:38px;left:22px;color:#a9c3c9;font:11px monospace;pointer-events:none;background:#0b1824cc;padding:4px 8px';
 document.body.append(perf);
 let frames=0,longFrames=0,lastFrame=performance.now(),lastReport=lastFrame,lastSnapshot=0,snapshotGap=0,snapshotCount=0;
 function animate(){
  const now=performance.now(),gap=now-lastFrame;lastFrame=now;frames++;if(gap>50)longFrames++;
+ const w=state?.wreck;
+ view.setScannerYaw(w?w.yaw+(rotationQueue.reduce((n,r)=>n+r.delta,0)+rotateDelta)*(1+(state.ship.upgrades.grapple||0)*.3):null);
  view.frame(yaw,pitch);
  if(now-lastReport>=1000){
-  perf.textContent='motion v2 · '+Math.round(frames*1000/(now-lastReport))+' FPS · stalls >50ms: '+longFrames+' · updates '+snapshotCount+'/s · longest gap '+Math.round(snapshotGap)+'ms';
+  perf.textContent='crew v3 · '+Math.round(frames*1000/(now-lastReport))+' FPS · stalls >50ms: '+longFrames+' · updates '+snapshotCount+'/s · longest gap '+Math.round(snapshotGap)+'ms';
   frames=0;longFrames=0;snapshotCount=0;snapshotGap=0;lastReport=now;
  }
  requestAnimationFrame(animate);
 }
 animate();
+
+$('contracts-anywhere').onclick=()=>openPanel(panel==='board'?null:'board');
+$('copy-room').onclick=async()=>{
+ if(!state)return;
+ try{await navigator.clipboard.writeText(state.code);toast('Room code copied: '+state.code);}
+ catch{toast('Room code: '+state.code+' — select and copy it from the top right.');}
+};

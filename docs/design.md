@@ -32,3 +32,11 @@ These limitations are tracked honestly rather than represented as finished featu
 ## Dependencies and priority
 Shared game state → room membership/input authority → ship locomotion → contracts/travel → grapple/scan → salvage/cargo grid → markets/fuel → quota/reset → inspections/combat → upgrades → hosted two-device acceptance.
 Build every economic operation on server state. Render snapshots in the browser. Keep prices, rights, deadlines and collisions testable without WebGL.
+
+## Playtest revisions — October 21
+- C and the HUD Contracts button open the contract list anywhere, including EVA and transit; purchases still use the shared account and server validation.
+- Room code remains visible with Copy code for invitations. Other devices need a reachable host address; localhost is only the local machine.
+- Hold Shift to sprint at twice normal speed (also twice carrying speed), with 100 stamina, 25/second drain, and 20/second recovery. Exhaustion requires recovery to 25 before sprinting resumes.
+- Identification is never a salvage gate. Crates may be recovered without scans, a model guess, or a grapple. Identification is planning information; model-specific doors/high-value part locations remain future work.
+- Grapple remains necessary for rotating/scanning and Crunch. Hold-drag uses cursor capture; V scans during dragging. Rotation packets are limited to 20/second with immediate local preview and server acknowledgment.
+- Crunch outputs largest-first Scrap crates from sizes 128, 64, 32, 16, 8, 4, 2, 1 m³. Maximum dimensions are 4×4×8m. No volume is discarded or invented. Prototype wreck yields are 16/40/160m³ by model. Output does not shrink to fit the current ship. Scrap sale value scales with volume.

@@ -68,7 +68,7 @@ export function addPlayer(s,id,name){
  assert(Object.keys(s.players).length<4,'Room has four reserved crew seats.');
  const n=Object.keys(s.players).length;
  s.players[id]={id,name:String(name||'Salvager').replace(/[<>&]/g,'').slice(0,18),pos:[n%2?2.7:-2.7,0,5+n],
- yaw:0,pitch:0,hp:100,held:null,input:{x:0,z:0,y:0},connected:true,lastSeen:s.time,fireAt:-10};
+ yaw:0,pitch:0,hp:100,stamina:100,sprintExhausted:false,held:null,input:{x:0,z:0,y:0},connected:true,lastSeen:s.time,fireAt:-10};
  s.captain??=id;
  log(s,s.players[id].name+' joined the crew.');
 }
@@ -114,6 +114,16 @@ export function marketPrice(s,type,market=s.location){
  const daily=1+(((s.marketDay+(market==='A'?0:2)+Object.keys(GOODS).indexOf(type))%5)-2)*0.04;
  return Math.floor(g.value*mult*daily*(demand>=4?0.75:1));
 }
+// Greedy packing conserves volume; ship capacity does not shrink the wreck's output.
+export const SCRAP_SIZES=[[4,4,8],[4,4,4],[4,2,4],[2,2,4],[2,2,2],[2,1,2],[2,1,1],[1,1,1]];
+export function scrapCrates(total){
+ assert(Number.isSafeInteger(total)&&total>=0&&total<=100000,'Invalid scrap volume.');
+ const result=[];
+ for(const dims of SCRAP_SIZES)while(total>=volume(dims)){result.push([...dims]);total-=volume(dims);}
+ return result;
+}
+export function cargoValue(c){return GOODS[c.type].value*(c.type==='scrap'?volume(c.dims)/volume(GOODS.scrap.dims):1);}
+export function cargoPrice(s,c,market=s.location){return Math.floor(marketPrice(s,c.type,market)*(c.type==='scrap'?volume(c.dims)/volume(GOODS.scrap.dims):1));}
 function makeCargo(s,type,source,pos,legal=true){
  const g=GOODS[type],c={id:'c'+s.nextId++,type,dims:[...g.dims],source,illegal:!!g.illegal||!legal,
  state:'loose',carrier:null,container:null,cell:null,packedDims:null,pos:[...pos],salvaged:false};
@@ -122,7 +132,7 @@ function makeCargo(s,type,source,pos,legal=true){
 function spawnWreck(s,lead){
  if(s.wrecks[lead.id])return s.wrecks[lead.id];
  const w={id:lead.id,model:lead.model,owner:lead.owner,yaw:0,pitch:0,grapple:false,crunched:false,crunchAt:0,
- clues:{},guess:null,taken:false,legal:lead.legal,enemies:[],rivalHP:lead.threat==='Rival salvage vessel'?80:0,rivalDestroyed:false};
+ scrapVolume:[16,40,160][lead.model],clues:{},guess:null,taken:false,legal:lead.legal,enemies:[],rivalHP:lead.threat==='Rival salvage vessel'?80:0,rivalDestroyed:false};
  const hostile=lead.threat==='Life signs'?'creature':lead.threat==='Armed survivors'?'survivor':lead.threat==='Rival salvage vessel'?'rival':null;
  if(hostile)w.enemies.push({id:'e'+s.nextId++,kind:hostile,pos:[0,0,-34],hp:hostile==='creature'?60:80,nextAttack:s.time+3});
  s.wrecks[lead.id]=w;
@@ -135,7 +145,7 @@ export function facingClue(w){
  return Math.round(a/(Math.PI*2)*5)%5;
 }
 function inWreck(p){return Math.abs(p.pos[0])<8&&p.pos[2]<-23&&p.pos[2]>-45&&p.pos[1]<7;}
-export function illegalValue(s,ids=null){return s.cargo.filter(c=>c.illegal&&c.state!=='lost'&&c.state!=='sold'&&c.state!=='destroyed'&&(!ids||ids.includes(c.id))).reduce((n,c)=>n+GOODS[c.type].value,0);}
+export function illegalValue(s,ids=null){return s.cargo.filter(c=>c.illegal&&c.state!=='lost'&&c.state!=='sold'&&c.state!=='destroyed'&&(!ids||ids.includes(c.id))).reduce((n,c)=>n+cargoValue(c),0);}
 function aboardCargo(s,c){return c.state==='secured'||(c.state==='held'&&onShip(s.players[c.carrier]||{pos:[99,99,99]}))||(c.state==='loose'&&onShip({pos:c.pos}));}
 export function policeScan(s){
  const rolls=new Map(),caught=[];
@@ -168,7 +178,7 @@ export function settleQuota(s,useExtension=false){
 function resetRun(s){
  const fresh=createGame(s.code,s.rng),players=s.players,captainId=s.captain,time=s.time,run=s.run+1;
  Object.assign(s,fresh,{players,captain:captainId,time,run});
- for(const p of Object.values(players)){p.pos=[2.8,0,5];p.hp=100;p.held=null;}
+ for(const p of Object.values(players)){p.pos=[2.8,0,5];p.hp=100;p.stamina=100;p.sprintExhausted=false;p.held=null;}
  log(s,'REPOSSESSED. Fresh starter ship; shared account reset to 1,000 credits.');
 }
 export function destroyShip(s){
@@ -176,7 +186,7 @@ export function destroyShip(s){
  s.ship=makeShip();for(const c of s.cargo)if(aboardCargo(s,c))c.state='lost';
  s.cargo=s.cargo.filter(c=>!['lost','sold','destroyed'].includes(c.state));
  s.location='A';s.phase='docked';s.transit=null;s.encounter=null;s.activeWreck=null;
- for(const p of Object.values(s.players)){p.pos=[2.8,0,5];p.hp=100;p.held=null;}
+ for(const p of Object.values(s.players)){p.pos=[2.8,0,5];p.hp=100;p.stamina=100;p.sprintExhausted=false;p.held=null;}
  log(s,'Ship destroyed. Starter restored; credits retained minus '+fine+' in outstanding fines. Quota clock is unchanged.');
 }
 function beginEncounter(s){
@@ -187,7 +197,7 @@ function beginEncounter(s){
 }
 export function setInput(s,id,input){
  const p=s.players[id];if(!p||!p.connected)return;
- p.input={x:clamp(finite(input.x)?input.x:0,-1,1),z:clamp(finite(input.z)?input.z:0,-1,1),y:clamp(finite(input.y)?input.y:0,-1,1)};
+ p.input={x:clamp(finite(input.x)?input.x:0,-1,1),z:clamp(finite(input.z)?input.z:0,-1,1),y:clamp(finite(input.y)?input.y:0,-1,1),sprint:input.sprint===true};
  if(finite(input.yaw))p.yaw=input.yaw%(Math.PI*2);
  if(finite(input.pitch))p.pitch=clamp(input.pitch,-1.4,1.4);
  p.lastSeen=s.time;
@@ -197,7 +207,7 @@ export function act(s,id,a){
  assert(a&&typeof a.type==='string','Invalid action.');
  switch(a.type){
  case 'accept':{
-  station(s,p,'board');assert(s.phase==='docked','Buy contracts while docked.');
+  // Contracts are available through the crew handheld from any location.
   const l=s.leads.find(l=>l.id===a.id);assert(l&&!l.accepted,'Contract unavailable or already accepted.');
   spend(s,l.cost);l.accepted=true;log(s,p.name+' accepted '+l.name+(l.legal?' (authorized).':' (UNAUTHORIZED).'));break;
  }
@@ -231,7 +241,8 @@ export function act(s,id,a){
  case 'rotate':{
   station(s,p,'scanner');const w=requireActive(s);assert(w.grapple&&!w.crunched,'Lock the grapple first.');
   assert(!Object.values(s.players).some(p=>p.connected&&!onShip(p)),'Rotation locked while crew is outside.');
-  w.yaw+=clamp(finite(a.delta)?a.delta:0,-0.15,0.15)*(1+s.ship.upgrades.grapple*.3);break;
+  w.yaw+=clamp(finite(a.delta)?a.delta:0,-0.15,0.15)*(1+s.ship.upgrades.grapple*.3);
+  if(Number.isSafeInteger(a.rotationId)&&a.rotationId>=0){w.rotationAcks??={};w.rotationAcks[p.id]=a.rotationId;}break;
  }
  case 'scan':{
   station(s,p,'scanner');const w=requireActive(s);assert(w.grapple&&!w.crunched,'Lock the grapple first.');
@@ -246,7 +257,7 @@ export function act(s,id,a){
  case 'pickup':{
   assert(s.phase==='salvage','Cargo recovery is available at the wreck.');assert(!p.held,'Your hands are full.');
   const c=s.cargo.find(c=>c.id===a.id);assert(c&&c.state==='loose'&&distance(p.pos,c.pos)<4,'Move closer to an available crate.');
-  const w=requireActive(s);assert(w.grapple||w.crunched,'Captain must stabilize the wreck with the grapple.');
+  const w=requireActive(s);assert(!w.crunchAt,'Crunch is underway.');
   c.state='held';c.carrier=p.id;p.held=c.id;
   if(!c.salvaged){c.salvaged=true;w.taken=true;}break;
  }
@@ -279,7 +290,7 @@ export function act(s,id,a){
   const ids=Array.isArray(a.ids)?a.ids:[a.id];let total=0,count=0;
   for(const c of s.cargo){
    if(!ids.includes(c.id)||c.state!=='secured')continue;
-   const price=marketPrice(s,c.type);if(!price)continue;
+   const price=cargoPrice(s,c);if(!price)continue;
    c.state='sold';total+=price;count++;s.demand[s.location+':'+c.type]=(s.demand[s.location+':'+c.type]||0)+1;
   }
   assert(count>0,'No saleable secured cargo selected. Market A refuses prohibited goods.');
@@ -379,7 +390,14 @@ export function tick(s,dt){
   if(!p.connected){if(s.time-p.lastSeen>60)delete s.players[id];continue;}
   if(s.time-p.lastSeen>1)p.input={x:0,z:0,y:0};
   let {x,z,y}=p.input,mag=Math.hypot(x,z,y);if(mag>1){x/=mag;z/=mag;y/=mag;}
-  const speed=(p.held?3.8:6)*dt;
+  const moving=mag>0;
+  p.stamina??=100;
+  if(p.sprintExhausted&&p.stamina>=25)p.sprintExhausted=false;
+  const sprinting=moving&&p.input.sprint&&!p.sprintExhausted&&p.stamina>0;
+  const sprintTime=sprinting?Math.min(dt,p.stamina/25):0;
+  if(sprinting){p.stamina=Math.max(0,p.stamina-25*dt);if(p.stamina===0)p.sprintExhausted=true;}
+  else p.stamina=Math.min(100,p.stamina+20*dt);
+  const speed=(p.held?3.8:6)*(dt+sprintTime);
   const delta=[(Math.cos(p.yaw)*x-Math.sin(p.yaw)*z)*speed,y*speed,(-Math.sin(p.yaw)*x-Math.cos(p.yaw)*z)*speed];
   for(let i=0;i<3;i++){const next=[...p.pos];next[i]+=delta[i];if(canMove(s,p,next))p.pos=next;}
   if(onShip(p))p.pos[1]=Math.max(0,p.pos[1]-dt*8);
@@ -390,7 +408,10 @@ export function tick(s,dt){
  if(w?.crunchAt&&s.time>=w.crunchAt){
   w.crunchAt=0;w.crunched=true;w.taken=true;w.grapple=false;w.enemies=[];
   for(const c of s.cargo)if(c.source===w.id&&c.state==='loose'&&!onShip({pos:c.pos}))c.state='destroyed';
-  for(let i=0;i<4;i++)makeCargo(s,'scrap',w.id,[-4+i*2.7,0,-30],w.legal);
+  let scrapX=-8;
+  for(const dims of scrapCrates(w.scrapVolume??16)){
+   const c=makeCargo(s,'scrap',w.id,[scrapX+dims[0]/2,0,-30],w.legal);c.dims=dims;scrapX+=dims[0]+1;
+  }
   log(s,'Crunch complete. Wreck contents destroyed; Scrap ready for collection.');
  }
  if(s.phase==='salvage'&&w&&!w.crunched){
@@ -402,6 +423,7 @@ export function tick(s,dt){
    if(d<range&&s.time>=e.nextAttack){
     p.hp-=e.kind==='creature'?20:12;e.nextAttack=s.time+2;
     if(p.hp<=0){
+     p.stamina=100;p.sprintExhausted=false;
      if(p.held){const c=s.cargo.find(c=>c.id===p.held);if(c){c.state='loose';c.carrier=null;c.pos=[...p.pos];}p.held=null;}
      p.pos=[2.8,0,6];p.hp=100;log(s,p.name+' recovered in the ship medbay; carried cargo left behind.');
     }
