@@ -28,6 +28,7 @@ export const STATIONS = {
  market:[3,0,1],engineering:[-3,0,3],poster:[-3,0,-6],cargo:[0,0,3],hatch:[0,0,8.7]
 };
 export const REAR_HATCH = {z:10.4,width:8.2,height:3.2};
+export const rearHatchHeight = s => REAR_HATCH.height + .5*(s.ship.upgrades.hull||0);
 export const volume = d => d[0]*d[1]*d[2];
 export const detectionChance = level => Math.pow(0.5,level);
 export const distance = (a,b) => Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]);
@@ -217,8 +218,8 @@ function cargoMoveValid(s,c,from,pos){
  const rear=s.ship.hatchOpen&&
   Math.abs(pos[0])+hx<=REAR_HATCH.width/2 &&
   Math.abs(from[0])+hx<=REAR_HATCH.width/2 &&
-  pos[1]+d[1]<=REAR_HATCH.height&&from[1]+d[1]<=REAR_HATCH.height &&
-  Math.min(from[2],pos[2])>7.9;
+  pos[1]+d[1]<=rearHatchHeight(s)&&from[1]+d[1]<=rearHatchHeight(s) &&
+  Math.min(from[2],pos[2])>REAR_HATCH.z-hz-.25;
  const fromInside=inside(from),toInside=inside(pos);
  if(fromInside!==toInside&&!rear&&!side(from)&&!side(pos))return false;
  // A crate spanning the rear hull intersects the actual closed hatch.
@@ -231,7 +232,7 @@ function cargoMoveValid(s,c,from,pos){
    if(!side(from)&&!side(pos))return false;
   }
   if(pos[2]+hz>REAR_HATCH.z&&!rear)return false;
-  if(pos[1]+d[1]>3.3&&!rear)return false;
+  if(pos[1]+d[1]>rearHatchHeight(s)+.1&&!rear)return false;
  }
  for(const o of s.cargo){
   if(o.id===c.id||!['loose','secured','tractored'].includes(o.state))continue;
