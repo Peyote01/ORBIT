@@ -56,9 +56,9 @@ function render(){
  $('tractor-status').textContent=tractorEquipped?(attached?'TRACTOR LOCKED · '+attached.type.toUpperCase()+' · '+beamDistance.toFixed(1)+'m':'TRACTOR READY [T]'):'TRACTOR STOWED [T]';
  $('tractor-status').classList.toggle('active',!!attached);
  const slot=attached?tractorSlot(state,attached):null;
- $('placement').textContent=attached?(slot?(slot.valid?'GREEN GRID · E TO MAGNETICALLY SECURE':'RED GRID · ROTATE TO ALIGN'):attached.pos[2]>7?'CLEAR REAR HATCH · PULL ENTIRE CRATE INTO HOLD':'MOVE CARGO NEAR AN OPEN FLOOR SLOT'):'';
+ $('placement').textContent=attached?(slot?(slot.valid?(slot.autoRotate?'GREEN GRID · E TO TIP & SECURE':'GREEN GRID · E TO MAGNETICALLY SECURE'):'RED GRID · ROTATE TO ALIGN'):attached.pos[2]>7?'CLEAR REAR HATCH · PULL ENTIRE CRATE INTO HOLD':'MOVE CARGO NEAR AN OPEN FLOOR SLOT'):'';
  $('placement').className=slot?.valid?'valid':slot?'invalid':'';
- $('prompt').textContent=panel?'':p.held?'Carrying '+GOODS[state.cargo.find(c=>c.id===p.held)?.type]?.name+' · E at cargo console to stow · Q drop':near?'E · '+(near.key==='hatch'?(state.ship.hatchOpen?'Close rear cargo hatch':'Open rear cargo hatch'):near.label):'Rear cargo hatch: H at aft switch · EVA through side airlock';
+ $('prompt').textContent=panel?'':p.tractor?'E · Secure in green grid · Q releases beam':near?'E · '+(near.key==='hatch'?(state.ship.hatchOpen?'Close rear cargo hatch':'Open rear cargo hatch'):near.label):'Aim at salvage and left-click to tractor · H operates aft hatch';
  if(panel)renderPanel();
  $('room-code').textContent=state.code;$('quick-actions').hidden=false;
  $('stamina').textContent='STAMINA '+Math.round(p.stamina??100)+'%'+(p.sprintExhausted?' · recovering':'');
@@ -66,15 +66,14 @@ function render(){
 function nearest(){
  const p=me();if(!p)return null;
  const options=Object.entries(STATIONS).map(([key,pos])=>({key,pos,label:key.toUpperCase()}));
- if(!p.held)for(const c of state.cargo)if(c.state==='loose')options.push({cargo:c.id,pos:c.pos,label:'Recover '+GOODS[c.type].name+' '+c.dims.join('×')+'m'});
  options.sort((a,b)=>distance(p.pos,a.pos)-distance(p.pos,b.pos));return options[0]&&distance(p.pos,options[0].pos)<4?options[0]:null;
 }
 function renderPanel(){
  if(!panel||!state)return;const p=me(),w=state.wreck;let html='<button data-close>← BACK TO DECK</button><h2>'+panel.toUpperCase()+'</h2>';
  if(panel==='board')html+='<p>Accept contracts anywhere with C. Start with free contracts. Purchases use the shared account. Coordinates without rights produce illegal salvage.</p>'+state.leads.map(l=>'<article><strong>'+esc(l.name)+'</strong><p>'+esc(l.owner)+' · '+l.range+' fuel · '+esc(l.threat)+'</p>'+btn(l.accepted?'ACCEPTED':l.cost?'Buy · ₡'+l.cost:'Accept · FREE','accept',{id:l.id})+'</article>').join('');
  if(panel==='nav'){
-  html+='<p>Close the rear cargo hatch before departure. Captain commits travel. All crew must be aboard and crates put down. First station departure each quota is free; subsequent station departures and leaving salvaged wrecks cost one day.</p>';
-  for(const target of [{id:'A',name:'Market A · industrial premium'},{id:'B',name:'Market B · technical / restricted'},...state.leads.filter(l=>l.accepted)])html+=btn('Travel: '+target.name,'travel',{id:target.id});
+  html+='<p>Close the rear cargo hatch before departure. Captain commits travel. All crew must be aboard and tractor-held crates secured or released. When quota payment is due, either Market A or B remains accessible for selling, but no new wrecks can be visited until you settle or extend. First station departure each quota is free; subsequent station departures and leaving salvaged wrecks cost one day.</p>';
+  for(const target of [{id:'A',name:'Market A · industrial premium'},{id:'B',name:'Market B · technical / restricted'},...(!state.quota.due?state.leads.filter(l=>l.accepted):[])])html+=btn('Travel: '+target.name,'travel',{id:target.id});
   html+='<article>'+btn('Ship cannon','shipfire')+btn('Boost escape · 10 fuel','boost')+btn('Pay police fine · ₡'+(state.encounter?.fine||0),'payfine')+btn('Fight police · 30s distress clock','fight')+'</article>';
   if(state.quota.due)html+=btn('Use one extension · +7 days, same quota','extend');
   html+=btn('Rescue tow: lose cargo, +₡300 quota +1 day','tow');
@@ -90,8 +89,8 @@ function renderPanel(){
  }
  if(panel==='poster')html+='<p>Compare these manufacturer records to scanned clues. Cargo values are estimates, not guaranteed profit.</p>'+catalog(w);
  if(panel==='cargo'){
-  html+='<p>The wide rear hatch admits bulky cargo that cannot pass the starboard side airlock. Walk to the rear/cargo console, use H or the button below to operate it. Close the hatch before travel. The starter bay still has finite crate-size limits.</p>'+btn(state.ship.hatchOpen?'Close rear cargo hatch':'Open rear cargo hatch','cargoHatch')+'<p>Crates occupy real grid cells. Auto-stow finds a supported position; dimensions and shape must fit. Shielding protects only crates in that bay.</p>';
-  for(const b of state.ship.containers){const d=holdDimensions(b),used=state.cargo.filter(c=>c.state==='secured'&&c.container===b.id).reduce((n,c)=>n+volume(c.dims),0);html+='<article><strong>'+b.name+' · '+used+'/'+volume(d)+' m³</strong><p>'+d.join('×')+'m · Shield '+b.shield+' · Detection '+Math.round(100*2**-b.shield)+'%</p>'+btn('Stow carried crate','secure',{container:b.id})+'</article>';}
+  html+='<p>The wide rear hatch admits bulky cargo that cannot pass the starboard side airlock. Walk to the rear/cargo console, use H or the button below to operate it. Close the hatch before travel. The starter bay still has finite crate-size limits.</p>'+btn(state.ship.hatchOpen?'Close rear cargo hatch':'Open rear cargo hatch','cargoHatch')+'<p>All salvage must be recovered with handheld tractor beams. E secures the crate when the magnetic grid is green. The grid can automatically turn a crate onto its side when that orientation fits the bay. Capacity is based on actual dimensions, not volume alone. Shielding protects only secured cargo.</p>';
+  for(const b of state.ship.containers){const d=holdDimensions(b),used=state.cargo.filter(c=>c.state==='secured'&&c.container===b.id).reduce((n,c)=>n+volume(c.dims),0);html+='<article><strong>'+b.name+' · '+used+'/'+volume(d)+' m³</strong><p>'+d.join('×')+'m · Shield '+b.shield+' · Detection '+Math.round(100*2**-b.shield)+'%</p>'+'</article>';}
   html+=state.cargo.filter(c=>c.state==='secured').map(c=>'<article>'+GOODS[c.type].name+' · '+c.dims.join('×')+'m'+(c.illegal?' · ILLEGAL':'')+btn('Jettison','jettison',{id:c.id})+'</article>').join('');
  }
  if(panel==='market'){
@@ -148,7 +147,7 @@ window.addEventListener('keydown',e=>{
  if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))return;
  keys[e.code]=true;if(['Space','Tab'].includes(e.code))e.preventDefault();if(e.repeat)return;
  if(e.code==='Escape'){openPanel(null);keys={};}
- if(e.code==='KeyE'){if(panel){openPanel(null);return;}if(me()?.tractor){action('tractorSecure');return;}const n=nearest();if(n?.cargo)action('pickup',{id:n.cargo});else if(n?.key==='hatch')action('cargoHatch');else if(n)openPanel(n.key);}
+ if(e.code==='KeyE'){if(panel){openPanel(null);return;}if(me()?.tractor){action('tractorSecure');return;}const n=nearest();if(n?.key==='hatch')action('cargoHatch');else if(n)openPanel(n.key);}
  if(e.code==='KeyC')openPanel(panel==='board'?null:'board');
  if(e.code==='KeyH')action('cargoHatch');
  if(e.code==='KeyT'){
@@ -156,7 +155,7 @@ window.addEventListener('keydown',e=>{
   if(!tractorEquipped&&me()?.tractor)action('tractorRelease');
   toast(tractorEquipped?'Tractor tool ready. Aim and left-click cargo.':'Tractor tool stowed.');
  }
- if(e.code==='KeyQ'){if(me()?.tractor)action('tractorRelease');else action('drop');}if(e.code==='KeyV'){e.preventDefault();scan();}
+ if(e.code==='KeyQ'&&me()?.tractor)action('tractorRelease');if(e.code==='KeyV'){e.preventDefault();scan();}
  if(e.code==='KeyF'){if(panel==='nav')action('shipfire');else{const p=me();const targets=(state?.wreck?.enemies||[]).filter(e=>e.hp>0).sort((a,b)=>distance(a.pos,p.pos)-distance(b.pos,p.pos));if(targets[0])action('shoot',{id:targets[0].id});}}
 });
 window.addEventListener('keyup',e=>delete keys[e.code]);window.addEventListener('blur',()=>{keys={};drag=false;rotateDelta=0;});
