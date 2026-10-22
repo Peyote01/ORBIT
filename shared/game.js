@@ -68,7 +68,7 @@ export function addPlayer(s,id,name){
  assert(Object.keys(s.players).length<4,'Room has four reserved crew seats.');
  const n=Object.keys(s.players).length;
  s.players[id]={id,name:String(name||'Salvager').replace(/[<>&]/g,'').slice(0,18),pos:[n%2?2.7:-2.7,0,5+n],
- yaw:0,pitch:0,hp:100,stamina:100,sprintExhausted:false,held:null,input:{x:0,z:0,y:0},connected:true,lastSeen:s.time,fireAt:-10};
+ yaw:0,pitch:0,hp:100,stamina:100,sprintExhausted:false,held:null,tractor:null,input:{x:0,z:0,y:0},connected:true,lastSeen:s.time,fireAt:-10};
  s.captain??=id;
  log(s,s.players[id].name+' joined the crew.');
 }
@@ -76,6 +76,7 @@ export function leavePlayer(s,id){
  const p=s.players[id];if(!p)return;
  p.connected=false;p.lastSeen=s.time;p.input={x:0,z:0,y:0};
  if(p.held){const c=s.cargo.find(c=>c.id===p.held);if(c){c.state='loose';c.carrier=null;c.pos=[...p.pos];}p.held=null;}
+ releaseTractor(s,p);
  if(s.captain===id)s.captain=Object.values(s.players).find(x=>x.connected)?.id||id;
 }
 export function holdDimensions(c){return [c.dims[0],c.shield?c.dims[1]/2:c.dims[1],c.dims[2]];}
@@ -126,7 +127,7 @@ export function cargoValue(c){return GOODS[c.type].value*(c.type==='scrap'?volum
 export function cargoPrice(s,c,market=s.location){return Math.floor(marketPrice(s,c.type,market)*(c.type==='scrap'?volume(c.dims)/volume(GOODS.scrap.dims):1));}
 function makeCargo(s,type,source,pos,legal=true){
  const g=GOODS[type],c={id:'c'+s.nextId++,type,dims:[...g.dims],source,illegal:!!g.illegal||!legal,
- state:'loose',carrier:null,container:null,cell:null,packedDims:null,pos:[...pos],salvaged:false};
+ state:'loose',carrier:null,container:null,cell:null,packedDims:null,pos:[...pos],angle:0,salvaged:false};
  s.cargo.push(c);return c;
 }
 function spawnWreck(s,lead){
@@ -146,7 +147,7 @@ export function facingClue(w){
 }
 function inWreck(p){return Math.abs(p.pos[0])<8&&p.pos[2]<-23&&p.pos[2]>-45&&p.pos[1]<7;}
 export function illegalValue(s,ids=null){return s.cargo.filter(c=>c.illegal&&c.state!=='lost'&&c.state!=='sold'&&c.state!=='destroyed'&&(!ids||ids.includes(c.id))).reduce((n,c)=>n+cargoValue(c),0);}
-function aboardCargo(s,c){return c.state==='secured'||(c.state==='held'&&onShip(s.players[c.carrier]||{pos:[99,99,99]}))||(c.state==='loose'&&onShip({pos:c.pos}));}
+function aboardCargo(s,c){return c.state==='secured'||(['held','tractored'].includes(c.state)&&onShip(s.players[c.carrier]||{pos:[99,99,99]}))||(c.state==='loose'&&onShip({pos:c.pos}));}
 export function policeScan(s){
  const rolls=new Map(),caught=[];
  for(const c of s.cargo){
@@ -178,15 +179,16 @@ export function settleQuota(s,useExtension=false){
 function resetRun(s){
  const fresh=createGame(s.code,s.rng),players=s.players,captainId=s.captain,time=s.time,run=s.run+1;
  Object.assign(s,fresh,{players,captain:captainId,time,run});
- for(const p of Object.values(players)){p.pos=[2.8,0,5];p.hp=100;p.stamina=100;p.sprintExhausted=false;p.held=null;}
+ for(const p of Object.values(players)){p.pos=[2.8,0,5];p.hp=100;p.stamina=100;p.sprintExhausted=false;p.held=null;p.tractor=null;}
  log(s,'REPOSSESSED. Fresh starter ship; shared account reset to 1,000 credits.');
 }
 export function destroyShip(s){
+ for(const p of Object.values(s.players))releaseTractor(s,p);
  const fine=s.encounter?.fine||0;s.credits=Math.max(0,s.credits-fine);
  s.ship=makeShip();for(const c of s.cargo)if(aboardCargo(s,c))c.state='lost';
  s.cargo=s.cargo.filter(c=>!['lost','sold','destroyed'].includes(c.state));
  s.location='A';s.phase='docked';s.transit=null;s.encounter=null;s.activeWreck=null;
- for(const p of Object.values(s.players)){p.pos=[2.8,0,5];p.hp=100;p.stamina=100;p.sprintExhausted=false;p.held=null;}
+ for(const p of Object.values(s.players)){p.pos=[2.8,0,5];p.hp=100;p.stamina=100;p.sprintExhausted=false;p.held=null;p.tractor=null;}
  log(s,'Ship destroyed. Starter restored; credits retained minus '+fine+' in outstanding fines. Quota clock is unchanged.');
 }
 function beginEncounter(s){
@@ -195,11 +197,57 @@ function beginEncounter(s){
  if(r<0.3){s.encounter={type:'police',stage:'warning',until:s.time+20,hp:100,fine:0,caught:[],nextShot:0};log(s,'POLICE: scan begins in 20 seconds, then runs for 5 seconds.');}
  else{s.encounter={type:'raider',stage:'attack',until:s.time+25,hp:80,fine:0,nextShot:s.time+5};log(s,'RAIDER INTERCEPT. Fire from navigation console, repair, or boost away.');}
 }
+// Tractor cargo has server-owned bottom-center world coordinates.
+const TRACTOR_RANGE=14, TRACTOR_SPEED=18;
+const wrapAngle=a=>Math.atan2(Math.sin(a),Math.cos(a));
+function releaseTractor(s,p){if(!p.tractor)return;const c=s.cargo.find(c=>c.id===p.tractor.id);if(c&&c.state==='tractored'&&c.carrier===p.id){
+ c.state='loose';c.carrier=null;
+ if(onShip({pos:c.pos})){c.pos[1]=0;c.velocity=null;}
+ else c.velocity=[-Math.sin(p.yaw)*.22,0,-Math.cos(p.yaw)*.22];
+}p.tractor=null;}
+const boxDims=c=>{const a=wrapAngle(c.angle||0),x=c.dims[0],z=c.dims[2];return [Math.abs(Math.cos(a))*x+Math.abs(Math.sin(a))*z,c.dims[1],Math.abs(Math.sin(a))*x+Math.abs(Math.cos(a))*z];};
+function cargoMoveValid(s,c,from,pos){
+ if(!pos.every(finite)||pos[1]<0||pos[1]+c.dims[1]>18||Math.abs(pos[0])>65||pos[2]<-65||pos[2]>30)return false;
+ const d=boxDims(c),hx=d[0]/2,hz=d[2]/2,inside=p=>p[0]>-4.4&&p[0]<4.4&&p[2]>-10.4&&p[2]<10.4;
+ const airlock=p=>p[0]>3.4&&p[0]<6.5&&p[2]>5.5&&p[2]<9.4&&d[0]<=2.2&&d[2]<=3.8;
+ if(inside(from)!==inside(pos)&&!airlock(from)&&!airlock(pos))return false;
+ if(inside(pos)&&(pos[0]-hx< -4.35||pos[0]+hx>4.35||pos[2]-hz< -10.35||pos[2]+hz>10.35||pos[1]+d[1]>3.3))return false;
+ for(const o of s.cargo){
+  if(o.id===c.id||!['loose','secured','tractored'].includes(o.state))continue;
+  let op=o.pos,od=boxDims(o);
+  if(o.state==='secured'){
+   const bay=s.ship.containers.find(b=>b.id===o.container);if(!bay)continue;
+   const i=s.ship.containers.indexOf(bay);od=o.packedDims;
+   op=[(i===0?-bay.dims[0]:0)+o.cell[0]+od[0]/2,o.cell[1],o.cell[2]+od[2]/2];
+  }
+  if(Math.abs(pos[0]-op[0])<(d[0]+od[0])/2-.04&&Math.abs(pos[2]-op[2])<(d[2]+od[2])/2-.04&&pos[1]<op[1]+od[1]-.04&&pos[1]+d[1]>op[1]+.04)return false;
+ }
+ return true;
+}
+export function tractorSlot(s,c){
+ if(!c||c.state!=='tractored')return null;
+ const turn=Math.round((c.angle||0)/(Math.PI/2)),mismatch=Math.abs(wrapAngle((c.angle||0)-turn*Math.PI/2));
+ const dims=Math.abs(turn%2)===1?[c.dims[2],c.dims[1],c.dims[0]]:[...c.dims];
+ let best=null;
+ for(let i=0;i<s.ship.containers.length;i++){
+  const bay=s.ship.containers[i],origin=i===0?-bay.dims[0]:0;
+  const cell=[Math.round(c.pos[0]-origin-dims[0]/2),Math.round(c.pos[1]),Math.round(c.pos[2]-dims[2]/2)];
+  const pos=[origin+cell[0]+dims[0]/2,cell[1],cell[2]+dims[2]/2],offset=distance(c.pos,pos);
+  if(offset>1.1||c.pos[2]<-1||c.pos[2]>bay.dims[2]+1)continue;
+  const valid=mismatch<.23&&offset<=.65&&fits(s,c,bay.id,cell,dims);
+  if(!best||(valid&&!best.valid)||(valid===best.valid&&offset<best.offset))best={container:bay.id,cell,dims,pos,valid,offset};
+ }
+ return best;
+}
 export function setInput(s,id,input){
  const p=s.players[id];if(!p||!p.connected)return;
  p.input={x:clamp(finite(input.x)?input.x:0,-1,1),z:clamp(finite(input.z)?input.z:0,-1,1),y:clamp(finite(input.y)?input.y:0,-1,1),sprint:input.sprint===true};
  if(finite(input.yaw))p.yaw=input.yaw%(Math.PI*2);
  if(finite(input.pitch))p.pitch=clamp(input.pitch,-1.4,1.4);
+ if(p.tractor){
+  if(finite(input.tractorDistance))p.tractor.targetDistance=clamp(input.tractorDistance,2,TRACTOR_RANGE);
+  if(finite(input.tractorAngle))p.tractor.targetAngle=wrapAngle(input.tractorAngle);
+ }
  p.lastSeen=s.time;
 }
 export function act(s,id,a){
@@ -215,7 +263,7 @@ export function act(s,id,a){
   station(s,p,'nav');captain(s,p);assert(!s.transit&&!s.encounter,'Finish the current encounter first.');
   assert(!s.quota.due,'Quota due: sell and settle, or use your extension.');
   assert(Object.values(s.players).filter(p=>p.connected).every(onShip),'All connected crew must be aboard.');
-  assert(!s.cargo.some(c=>c.state==='held'),'Secure or drop carried cargo before departure.');
+  assert(!s.cargo.some(c=>['held','tractored'].includes(c.state)),'Secure or drop carried cargo before departure.');
   const target=a.id;assert(target!==s.location,'Already at this destination.');
   let fuel=10;
   if(!['A','B'].includes(target)){
@@ -254,6 +302,30 @@ export function act(s,id,a){
   assert(MODELS.some(m=>m.id===a.model),'Unknown model.');w.guess=a.model;
   log(s,'Crew hypothesis: '+MODELS.find(m=>m.id===a.model).name+'. Compare all five clues for certainty.');break;
  }
+ case 'tractorAttach':{
+  assert(s.phase==='salvage','Tractor salvage requires a wreck.');
+  assert(!p.held&&!p.tractor,'Release your current cargo first.');
+  const c=s.cargo.find(c=>c.id===a.id&&c.state==='loose');assert(c,'Cargo is not available.');
+  const center=[c.pos[0],c.pos[1]+c.dims[1]/2,c.pos[2]],origin=[p.pos[0],p.pos[1]+1.6,p.pos[2]];
+  const v=center.map((n,i)=>n-origin[i]),len=Math.hypot(...v);
+  assert(len>=.5&&len<=TRACTOR_RANGE,'Crate outside tractor range.');
+  const forward=[-Math.sin(p.yaw)*Math.cos(p.pitch),Math.sin(p.pitch),-Math.cos(p.yaw)*Math.cos(p.pitch)];
+  const dot=v.reduce((sum,n,i)=>sum+n*forward[i],0),perp=Math.sqrt(Math.max(0,len*len-dot*dot));
+  assert(dot>0&&perp<=Math.max(1,Math.max(...c.dims)*.6),'Aim directly at the crate.');
+  c.state='tractored';c.carrier=p.id;
+  p.tractor={id:c.id,distance:clamp(len,2,TRACTOR_RANGE),targetDistance:clamp(len,2,TRACTOR_RANGE),angle:c.angle||0,targetAngle:c.angle||0};
+  const w=requireActive(s);if(!c.salvaged){c.salvaged=true;w.taken=true;}break;
+ }
+ case 'tractorRelease':{assert(p.tractor,'No cargo attached.');releaseTractor(s,p);break;}
+ case 'tractorSecure':{
+  assert(p.tractor,'Attach cargo first.');assert(onShip(p),'Move into the cargo hold first.');
+  const c=s.cargo.find(c=>c.id===p.tractor.id&&c.carrier===p.id);assert(c,'Tractor attachment lost.');
+  assert(distance(p.pos,c.pos)<7,'Move closer to the crate.');
+  const slot=tractorSlot(s,c);assert(slot?.valid,'Move and rotate cargo onto a green grid space.');
+  c.state='secured';c.container=slot.container;c.cell=slot.cell;c.packedDims=slot.dims;
+  c.angle=Math.round(c.angle/(Math.PI/2))*(Math.PI/2);c.carrier=null;p.tractor=null;
+  log(s,GOODS[c.type].name+' secured in '+s.ship.containers.find(b=>b.id===slot.container).name+'.');break;
+ }
  case 'pickup':{
   assert(s.phase==='salvage','Cargo recovery is available at the wreck.');assert(!p.held,'Your hands are full.');
   const c=s.cargo.find(c=>c.id===a.id);assert(c&&c.state==='loose'&&distance(p.pos,c.pos)<4,'Move closer to an available crate.');
@@ -282,7 +354,7 @@ export function act(s,id,a){
   station(s,p,'scanner');captain(s,p);const w=requireActive(s);
   assert(w.grapple&&!w.crunched&&!w.crunchAt,'Lock an intact wreck first.');
   assert(Object.values(s.players).filter(p=>p.connected).every(onShip),'All crew must be aboard before Crunch.');
-  assert(!s.cargo.some(c=>c.state==='held'),'Put down carried cargo first.');
+  assert(!s.cargo.some(c=>['held','tractored'].includes(c.state)),'Put down carried cargo first.');
   w.crunchAt=s.time+3;log(s,'CRUNCH: blast shutters closed. Everything left inside will be destroyed.');break;
  }
  case 'sell':{
@@ -317,12 +389,12 @@ export function act(s,id,a){
    log(s,c.name+' shielding level '+c.shield+'. Capacity stays at 50% of standard.');break;
   }
   const u=UPGRADES[a.key];assert(u&&s.ship.upgrades[a.key]<u.max,'Upgrade unavailable.');
-  if(a.key==='hull')assert(!s.cargo.some(c=>c.state==='held'),'Secure cargo first.');
+  if(a.key==='hull')assert(!s.cargo.some(c=>['held','tractored'].includes(c.state)),'Secure cargo first.');
   const level=s.ship.upgrades[a.key];spend(s,u.cost*(level+1));s.ship.upgrades[a.key]++;
   if(a.key==='armor'){s.ship.maxHull+=50;s.ship.hull+=50;}
   if(a.key==='tank')s.ship.maxFuel+=50;
   if(a.key==='hull'){
-   assert(!s.cargo.some(c=>c.state==='held'),'Secure cargo first.');
+   assert(!s.cargo.some(c=>['held','tractored'].includes(c.state)),'Secure cargo first.');
    const replacement=makeShip(level+1);
    s.ship.containers.forEach((c,i)=>c.dims=replacement.containers[i].dims);
    s.ship.extensionAvailable=true; // A new hull is a new ship; other purchased upgrades transfer in this prototype.
@@ -371,7 +443,7 @@ export function act(s,id,a){
   for(const c of s.cargo)if(aboardCargo(s,c))c.state='lost';
   s.quota.amount+=300;s.ship.fuel=Math.max(20,s.ship.fuel);s.quota.days++;s.marketDay++;s.location='A';s.phase='docked';s.transit=null;s.activeWreck=null;
   s.quota.due=s.quota.days>=s.quota.limit;
-  for(const p of Object.values(s.players)){p.pos=[2.8,0,5];p.held=null;}
+  for(const p of Object.values(s.players)){releaseTractor(s,p);p.pos=[2.8,0,5];p.held=null;}
   log(s,'Rescue tow: cargo forfeited, +300 quota, one travel day.');break;
  }
  default:throw Error('Unknown action.');
@@ -402,6 +474,20 @@ export function tick(s,dt){
   for(let i=0;i<3;i++){const next=[...p.pos];next[i]+=delta[i];if(canMove(s,p,next))p.pos=next;}
   if(onShip(p))p.pos[1]=Math.max(0,p.pos[1]-dt*8);
   if(p.held){const c=s.cargo.find(c=>c.id===p.held);if(c)c.pos=[p.pos[0]-Math.sin(p.yaw)*2,p.pos[1]+1,p.pos[2]-Math.cos(p.yaw)*2];}
+  if(p.tractor){
+   const t=p.tractor,c=s.cargo.find(c=>c.id===t.id);
+   if(!c||c.state!=='tractored'||c.carrier!==p.id){p.tractor=null;continue;}
+   t.distance+=clamp(t.targetDistance-t.distance,-5*dt,5*dt);
+   const oldAngle=c.angle||0;
+   t.angle=wrapAngle(t.angle+clamp(wrapAngle(t.targetAngle-t.angle),-4*dt,4*dt));c.angle=t.angle;
+   if(!cargoMoveValid(s,c,c.pos,c.pos)){c.angle=oldAngle;t.angle=oldAngle;}
+   const dir=[-Math.sin(p.yaw)*Math.cos(p.pitch),Math.sin(p.pitch),-Math.cos(p.yaw)*Math.cos(p.pitch)];
+   const wanted=[p.pos[0]+dir[0]*t.distance,p.pos[1]+1.6+dir[1]*t.distance-c.dims[1]/2,p.pos[2]+dir[2]*t.distance];
+   const diff=wanted.map((n,i)=>n-c.pos[i]),len=Math.hypot(...diff),ratio=len?Math.min(1,TRACTOR_SPEED*dt/len):0;
+   const next=c.pos.map((n,i)=>n+diff[i]*ratio);
+   if(cargoMoveValid(s,c,c.pos,next))c.pos=next;
+   else for(let axis=0;axis<3;axis++){const point=[...c.pos];point[axis]=next[axis];if(cargoMoveValid(s,c,c.pos,point))c.pos=point;}
+  }
  }
  if(!s.players[s.captain]||!s.players[s.captain].connected)s.captain=Object.values(s.players).find(p=>p.connected)?.id||null;
  const w=s.activeWreck?s.wrecks[s.activeWreck]:null;
@@ -414,6 +500,11 @@ export function tick(s,dt){
   }
   log(s,'Crunch complete. Wreck contents destroyed; Scrap ready for collection.');
  }
+ for(const c of s.cargo){
+  if(c.state!=='loose'||!c.velocity)continue;
+  const next=c.pos.map((n,i)=>n+c.velocity[i]*dt);
+  if(cargoMoveValid(s,c,c.pos,next))c.pos=next;else c.velocity=null;
+ }
  if(s.phase==='salvage'&&w&&!w.crunched){
   for(const e of w.enemies.filter(e=>e.hp>0)){
    const targets=Object.values(s.players).filter(p=>p.connected&&!onShip(p));
@@ -425,6 +516,7 @@ export function tick(s,dt){
     if(p.hp<=0){
      p.stamina=100;p.sprintExhausted=false;
      if(p.held){const c=s.cargo.find(c=>c.id===p.held);if(c){c.state='loose';c.carrier=null;c.pos=[...p.pos];}p.held=null;}
+     releaseTractor(s,p);
      p.pos=[2.8,0,6];p.hp=100;log(s,p.name+' recovered in the ship medbay; carried cargo left behind.');
     }
    }
@@ -456,7 +548,7 @@ export function tick(s,dt){
 export function snapshot(s){
  const w=s.activeWreck?s.wrecks[s.activeWreck]:null;
  const cargo=s.cargo.filter(c=>!['sold','lost','destroyed'].includes(c.state)&&
-  (c.state==='secured'||c.state==='held'||onShip({pos:c.pos})||c.source===s.activeWreck||c.source==='rival-'+s.activeWreck));
+  (c.state==='secured'||c.state==='held'||c.state==='tractored'||onShip({pos:c.pos})||c.source===s.activeWreck||c.source==='rival-'+s.activeWreck));
  return {version:VERSION,code:s.code,time:s.time,run:s.run,captain:s.captain,credits:s.credits,ship:s.ship,location:s.location,phase:s.phase,
  quota:s.quota,leads:s.leads.map(({goods,model,...l})=>l),players:Object.values(s.players).map(({input,...p})=>p),
  cargo,wreck:w?{...w,model:undefined,visual:{color:MODELS[w.model].color,thrusters:w.model===1?4:2},owner:Object.keys(w.clues).length>=3?w.owner:'Unidentified'}:null,

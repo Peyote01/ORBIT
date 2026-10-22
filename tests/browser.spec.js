@@ -46,6 +46,7 @@ test('contracts and room code are accessible; continuous scanner drag allows V',
   await page.goto('http://127.0.0.1:'+app.server.address().port);
   await page.getByRole('button',{name:'START A CREW'}).click();
   await expect(page.locator('#room-code')).toHaveText(/^[A-F0-9]{6}$/);
+  await expect(page.locator('#room-code')).not.toHaveText('');
   const code=await page.locator('#room-code').innerText(),s=app.rooms.get(code),id=s.captain;
   await page.getByRole('button',{name:'Copy code',exact:true}).click();
   expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(code);
@@ -71,6 +72,39 @@ test('contracts and room code are accessible; continuous scanner drag allows V',
   await expect.poll(()=>s.wrecks['free-a'].yaw).not.toBe(first);
   await page.mouse.up();
   await expect.poll(()=>page.evaluate(()=>!!document.pointerLockElement)).toBe(false);
+  expect(errors).toEqual([]);
+ }finally{await context.close();await app.close();}
+});
+
+test('handheld tractor locks visible cargo and synchronizes input with the server',async({browser})=>{
+ const {startServer}=await import('../server/index.js');
+ const {act,tick,STATIONS}=await import('../shared/game.js');
+ const {once}=await import('node:events');
+ const app=startServer(0);await once(app.server,'listening');
+ const context=await browser.newContext({viewport:{width:1280,height:800}});
+ const page=await context.newPage(),errors=[];
+ page.on('pageerror',e=>errors.push(e.message));
+ try{
+  await page.goto('http://127.0.0.1:'+app.server.address().port);
+  await page.getByRole('button',{name:'START A CREW'}).click();
+  await expect(page.locator('#room-code')).toHaveText(/^[A-F0-9]{6}$/);
+  const code=await page.locator('#room-code').innerText(),s=app.rooms.get(code),id=s.captain;
+  act(s,id,{type:'accept',id:'free-a'});
+  s.players[id].pos=[...STATIONS.nav];act(s,id,{type:'travel',id:'free-a'});
+  for(let i=0;i<180;i++)tick(s,.05);
+  const c=s.cargo[0];c.pos[1]=1.1;
+  s.players[id].pos=[c.pos[0],0,c.pos[2]+5];
+  await expect(page.locator('#crew')).toContainText('SALVAGE');
+  await page.waitForTimeout(450);
+  await page.mouse.click(640,400);
+  await expect.poll(()=>s.players[id].tractor?.id).toBe(c.id);
+  await expect(page.locator('#tractor-status')).toContainText('TRACTOR LOCKED');
+  const initial=s.players[id].tractor.targetDistance;
+  await page.mouse.wheel(0,-450);
+  await expect.poll(()=>s.players[id].tractor?.targetDistance).toBeLessThan(initial);
+  await page.keyboard.press('q');
+  await expect.poll(()=>s.players[id].tractor).toBe(null);
+  expect(c.state).toBe('loose');
   expect(errors).toEqual([]);
  }finally{await context.close();await app.close();}
 });

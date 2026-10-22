@@ -1,7 +1,8 @@
 import {createScene} from './scene.js';
-import {STATIONS,MODELS,MODEL_KEYS,GOODS,UPGRADES,distance,holdDimensions,volume,facingClue} from '/shared/game.js';
+import {STATIONS,MODELS,MODEL_KEYS,GOODS,UPGRADES,distance,holdDimensions,volume,facingClue,tractorSlot} from '/shared/game.js';
 const $=id=>document.getElementById(id),esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let view;try{view=createScene($('world'));}catch(e){$('status').textContent='WebGL unavailable: '+e.message;throw e;}
+let tractorEquipped=true,beamDistance=4,beamAngle=0,activeTractor=null;
 let ws,state,id,token=sessionStorage.getItem('orbit-token'),panel=null,yaw=0,pitch=0,sequence=0,keys={},drag=false,toastTimer,rotateDelta=0,rotationId=0,rotationQueue=[],rotationWreck=null;
 const me=()=>state?.players.find(p=>p.id===id);
 function toast(t){$('toast').textContent=t;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').textContent='',5000);}
@@ -27,6 +28,11 @@ function connect(create=false,resume=false){
   if(m.type==='welcome'){id=m.id;token=m.token;sessionStorage.setItem('orbit-token',token);$('lobby').hidden=true;for(const el of ['hud','crew','crosshair','logs','controls'])$(el).hidden=false;toast('Room '+m.code+' — share this code. Click the scene to look around.');}
   if(m.type==='error'){rotationQueue=rotationQueue.filter(r=>r.seq!==m.seq);$('status').textContent=m.message;toast(m.message);}
   if(m.type==='state'){const received=performance.now();if(lastSnapshot)snapshotGap=Math.max(snapshotGap,received-lastSnapshot);lastSnapshot=received;snapshotCount++;state=m.state;
+   const own=me()?.tractor;
+   if(own?.id!==activeTractor){
+    activeTractor=own?.id||null;
+    if(own){beamDistance=own.distance;beamAngle=own.angle;}
+   }
    if(rotationWreck!==state.wreck?.id){resetRotation();rotationWreck=state.wreck?.id;}
    const acknowledged=state.wreck?.rotationAcks?.[id]??-1;
    rotationQueue=rotationQueue.filter(r=>r.id>acknowledged);
@@ -46,7 +52,13 @@ function render(){
  setHTML('crew',state.players.map(p=>esc(p.name)+(p.id===state.captain?' ★':'')+' · '+(p.connected?p.hp+' HP':'offline')).join('<br>')+'<br><br>'+state.phase.toUpperCase()+' / '+esc(state.location)+(state.encounter?'<br>'+state.encounter.type.toUpperCase()+' · '+state.encounter.stage+'<br>'+Math.max(0,Math.ceil((state.encounter.until||state.time)-state.time))+' sec · HP '+state.encounter.hp:''));
  setHTML('logs',state.log.slice(0,5).map(l=>'<div>'+esc(l.text)+'</div>').join(''));
  $('shutter').hidden=!state.wreck?.crunchAt;
- const near=nearest();$('prompt').textContent=panel?'':p.held?'Carrying '+GOODS[state.cargo.find(c=>c.id===p.held)?.type]?.name+' · E at cargo console to stow · Q drop':near?'E · '+near.label:'Starboard rear airlock → EVA to wreck';
+ const near=nearest(),attached=p.tractor&&state.cargo.find(c=>c.id===p.tractor.id);
+ $('tractor-status').textContent=tractorEquipped?(attached?'TRACTOR LOCKED · '+attached.type.toUpperCase()+' · '+beamDistance.toFixed(1)+'m':'TRACTOR READY [T]'):'TRACTOR STOWED [T]';
+ $('tractor-status').classList.toggle('active',!!attached);
+ const slot=attached?tractorSlot(state,attached):null;
+ $('placement').textContent=attached?(slot?(slot.valid?'GREEN GRID · E TO SECURE':'RED GRID · ADJUST CARGO'):'MOVE CRATE INTO CARGO BAY'):'';
+ $('placement').className=slot?.valid?'valid':slot?'invalid':'';
+ $('prompt').textContent=panel?'':p.held?'Carrying '+GOODS[state.cargo.find(c=>c.id===p.held)?.type]?.name+' · E at cargo console to stow · Q drop':near?'E · '+near.label:'Starboard rear airlock → EVA to wreck';
  if(panel)renderPanel();
  $('room-code').textContent=state.code;$('quick-actions').hidden=false;
  $('stamina').textContent='STAMINA '+Math.round(p.stamina??100)+'%'+(p.sprintExhausted?' · recovering':'');
@@ -111,25 +123,43 @@ window.addEventListener('pointerup',e=>{
  if(panel==='scanner')document.exitPointerLock();
 });
 window.addEventListener('pointercancel',()=>{drag=false;rotateDelta=0;});
+$('world').addEventListener('pointerdown',e=>{
+ if(panel||!state||!tractorEquipped||e.button!==0)return;
+ const p=me();if(!p)return;
+ if(p.tractor){action('tractorRelease');return;}
+ const crate=view.targetCargo();
+ if(crate){action('tractorAttach',{id:crate});} 
+});
+$('world').addEventListener('contextmenu',e=>{e.preventDefault();if(me()?.tractor)action('tractorRelease');});
+window.addEventListener('wheel',e=>{
+ if(!panel&&me()?.tractor){e.preventDefault();beamDistance=Math.max(2,Math.min(14,beamDistance+Math.sign(e.deltaY)*.6));}
+},{passive:false});
+
 document.addEventListener('pointerlockchange',()=>{if(!document.pointerLockElement)drag=false;});
 window.addEventListener('mousemove',e=>{
  if(drag&&panel==='scanner'){
   rotateDelta=Math.max(-.15,Math.min(.15,rotateDelta+e.movementX*.005));
  }else if(document.pointerLockElement&&!panel){
-  yaw-=e.movementX*.002;pitch=Math.max(-1.4,Math.min(1.4,pitch-e.movementY*.002));
+  if(keys.KeyR&&me()?.tractor){beamAngle+=e.movementX*.012;}
+  else{yaw-=e.movementX*.002;pitch=Math.max(-1.4,Math.min(1.4,pitch-e.movementY*.002));}
  }
 });
 window.addEventListener('keydown',e=>{
  if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))return;
  keys[e.code]=true;if(['Space','Tab'].includes(e.code))e.preventDefault();if(e.repeat)return;
  if(e.code==='Escape'){openPanel(null);keys={};}
- if(e.code==='KeyE'){if(panel){openPanel(null);return;}const n=nearest();if(n?.cargo)action('pickup',{id:n.cargo});else if(n)openPanel(n.key);}
+ if(e.code==='KeyE'){if(panel){openPanel(null);return;}if(me()?.tractor){action('tractorSecure');return;}const n=nearest();if(n?.cargo)action('pickup',{id:n.cargo});else if(n)openPanel(n.key);}
  if(e.code==='KeyC')openPanel(panel==='board'?null:'board');
- if(e.code==='KeyQ')action('drop');if(e.code==='KeyV'){e.preventDefault();scan();}
+ if(e.code==='KeyT'){
+  tractorEquipped=!tractorEquipped;
+  if(!tractorEquipped&&me()?.tractor)action('tractorRelease');
+  toast(tractorEquipped?'Tractor tool ready. Aim and left-click cargo.':'Tractor tool stowed.');
+ }
+ if(e.code==='KeyQ'){if(me()?.tractor)action('tractorRelease');else action('drop');}if(e.code==='KeyV'){e.preventDefault();scan();}
  if(e.code==='KeyF'){if(panel==='nav')action('shipfire');else{const p=me();const targets=(state?.wreck?.enemies||[]).filter(e=>e.hp>0).sort((a,b)=>distance(a.pos,p.pos)-distance(b.pos,p.pos));if(targets[0])action('shoot',{id:targets[0].id});}}
 });
 window.addEventListener('keyup',e=>delete keys[e.code]);window.addEventListener('blur',()=>{keys={};drag=false;rotateDelta=0;});
-setInterval(()=>{flushRotation();if(state&&ws?.readyState===1)ws.send(JSON.stringify({type:'input',x:panel?0:Number(!!keys.KeyD)-Number(!!keys.KeyA),z:panel?0:Number(!!keys.KeyW)-Number(!!keys.KeyS),y:panel?0:Number(!!keys.Space)-Number(!!keys.ControlLeft),sprint:!panel&&(!!keys.ShiftLeft||!!keys.ShiftRight),yaw,pitch}));},50);
+setInterval(()=>{flushRotation();if(state&&ws?.readyState===1)ws.send(JSON.stringify({type:'input',...(me()?.tractor?.id===activeTractor&&activeTractor?{tractorDistance:beamDistance,tractorAngle:beamAngle}:{}),x:panel?0:Number(!!keys.KeyD)-Number(!!keys.KeyA),z:panel?0:Number(!!keys.KeyW)-Number(!!keys.KeyS),y:panel?0:Number(!!keys.Space)-Number(!!keys.ControlLeft),sprint:!panel&&(!!keys.ShiftLeft||!!keys.ShiftRight),yaw,pitch}));},50);
 const perf=document.createElement('div');perf.id='performance';
 perf.style.cssText='position:fixed;bottom:38px;left:22px;color:#a9c3c9;font:11px monospace;pointer-events:none;background:#0b1824cc;padding:4px 8px';
 document.body.append(perf);
