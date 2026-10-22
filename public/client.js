@@ -159,7 +159,7 @@ window.addEventListener('keydown',e=>{
  if(e.code==='KeyF'){if(panel==='nav')action('shipfire');else{const p=me();const targets=(state?.wreck?.enemies||[]).filter(e=>e.hp>0).sort((a,b)=>distance(a.pos,p.pos)-distance(b.pos,p.pos));if(targets[0])action('shoot',{id:targets[0].id});}}
 });
 window.addEventListener('keyup',e=>delete keys[e.code]);window.addEventListener('blur',()=>{keys={};drag=false;rotateDelta=0;});
-setInterval(()=>{flushRotation();if(state&&ws?.readyState===1)ws.send(JSON.stringify({type:'input',tractorDistance:beamDistance,tractorAngle:beamAngle,x:panel?0:Number(!!keys.KeyD)-Number(!!keys.KeyA),z:panel?0:Number(!!keys.KeyW)-Number(!!keys.KeyS),y:panel?0:Number(!!keys.Space)-Number(!!keys.ControlLeft),sprint:!panel&&(!!keys.ShiftLeft||!!keys.ShiftRight),yaw,pitch}));},50);
+setInterval(()=>{flushRotation();if(state&&ws?.readyState===1)ws.send(JSON.stringify({type:'input',...(me()?.tractor?.id===activeTractor&&activeTractor?{tractorDistance:beamDistance,tractorAngle:beamAngle}:{}),x:panel?0:Number(!!keys.KeyD)-Number(!!keys.KeyA),z:panel?0:Number(!!keys.KeyW)-Number(!!keys.KeyS),y:panel?0:Number(!!keys.Space)-Number(!!keys.ControlLeft),sprint:!panel&&(!!keys.ShiftLeft||!!keys.ShiftRight),yaw,pitch}));},50);
 const perf=document.createElement('div');perf.id='performance';
 perf.style.cssText='position:fixed;bottom:38px;left:22px;color:#a9c3c9;font:11px monospace;pointer-events:none;background:#0b1824cc;padding:4px 8px';
 document.body.append(perf);
