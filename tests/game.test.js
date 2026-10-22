@@ -192,8 +192,7 @@ test('upgraded ship hatch admits full-size reactor crate and grid can secure it'
  p.pos=[0,0,9.2];p.yaw=Math.PI;p.pitch=.06;
  act(s,'p',{type:'tractorAttach',id:c.id});
  act(s,'p',{type:'cargoHatch'});
- setInput(s,'p',{z:-1,yaw:Math.PI,pitch:.06});
- for(let i=0;i<40;i++)tick(s,.05);
+ for(let i=0;i<40;i++){setInput(s,'p',{z:-1,yaw:Math.PI,pitch:.06});tick(s,.05);}
  assert.ok(c.pos[2]<REAR_HATCH.z-4,'Reactor must fully clear upgraded aft doorway: z='+c.pos[2]+' pilot='+p.pos[2]+' distance='+p.tractor?.distance);
  p.pos=[-2,0,5];c.pos=[-2,0,4];c.angle=0;
  const slot=tractorSlot(s,c);assert.equal(slot?.valid,true);
