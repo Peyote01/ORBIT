@@ -210,7 +210,7 @@ function releaseTractor(s,p){if(!p.tractor)return;const c=s.cargo.find(c=>c.id==
 const boxDims=c=>{const a=wrapAngle(c.angle||0),x=c.dims[0],z=c.dims[2];return [Math.abs(Math.cos(a))*x+Math.abs(Math.sin(a))*z,c.dims[1],Math.abs(Math.sin(a))*x+Math.abs(Math.cos(a))*z];};
 // Aft opening is a real portal: a crate must physically clear the frame.
 // Side airlock stays available for small salvage and crew EVA.
-function cargoMoveValid(s,c,from,pos){
+export function cargoMoveValid(s,c,from,pos){
  if(!pos.every(finite)||pos[1]<0||pos[1]+c.dims[1]>18||Math.abs(pos[0])>65||pos[2]<-65||pos[2]>30)return false;
  const d=boxDims(c),hx=d[0]/2,hz=d[2]/2;
  const inside=p=>p[0]>-4.4&&p[0]<4.4&&p[2]>-10.4&&p[2]<REAR_HATCH.z;
