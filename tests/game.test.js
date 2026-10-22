@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createGame,addPlayer,act,tick,STATIONS,settleQuota,holdDimensions,policeScan,detectionChance,fits,destroyShip,setInput,scrapCrates,volume,cargoValue,cargoPrice} from '../shared/game.js';
+import {createGame,addPlayer,act,tick,STATIONS,settleQuota,holdDimensions,policeScan,detectionChance,fits,destroyShip,setInput,scrapCrates,volume,cargoValue,cargoPrice,tractorSlot} from '../shared/game.js';
 function game(){const s=createGame('TEST',()=>.99);addPlayer(s,'p','Captain');return s;}
 function at(s,key){s.players.p.pos=[...STATIONS[key]];}
 function advance(s,n){for(let i=0;i<n*20;i++)tick(s,.05);}
@@ -78,4 +78,34 @@ test('scan accepts the facing component while rotating without a release step',(
  for(let i=0;i<8;i++)act(s,'p',{type:'rotate',delta:.15,rotationId:i});
  act(s,'p',{type:'scan'});assert.equal(Object.keys(s.wrecks[s.activeWreck].clues).length,1);
  assert.equal(s.wrecks[s.activeWreck].rotationAcks.p,7);
+});
+
+test('handheld tractor is exclusive, range-checked and releases cargo on disconnect',()=>{
+ const s=game();addPlayer(s,'q','Wingmate');
+ act(s,'p',{type:'accept',id:'free-a'});at(s,'nav');act(s,'p',{type:'travel',id:'free-a'});advance(s,9);
+ const c=s.cargo[0],p=s.players.p;
+ p.pos=[c.pos[0],0,c.pos[2]+3];p.yaw=0;p.pitch=-.35;
+ act(s,'p',{type:'tractorAttach',id:c.id});
+ assert.equal(c.state,'tractored');assert.equal(c.carrier,'p');
+ s.players.q.pos=[...p.pos];s.players.q.pitch=-.35;
+ assert.throws(()=>act(s,'q',{type:'tractorAttach',id:c.id}),/not available/);
+ setInput(s,'p',{tractorDistance:6,tractorAngle:Math.PI/2,pitch:-.1,yaw:0});
+ advance(s,1);
+ assert.ok(Math.abs(p.tractor.distance-6)<.1);
+ assert.ok(Math.abs(c.angle-Math.PI/2)<.1);
+ assert.equal(c.state,'tractored');
+ act(s,'p',{type:'tractorRelease'});
+ assert.equal(c.state,'loose');assert.equal(c.carrier,null);assert.equal(p.tractor,null);
+ assert.throws(()=>act(s,'p',{type:'tractorAttach',id:c.id}),/outside tractor range|Aim directly|Crate outside|not available/);
+});
+test('tractor can snap crates to grid; blocked and rotated placement is rejected',()=>{
+ const s=game();act(s,'p',{type:'accept',id:'free-a'});at(s,'nav');act(s,'p',{type:'travel',id:'free-a'});advance(s,9);
+ const c=s.cargo[0],p=s.players.p;p.pos=[...c.pos];p.pos[2]+=3;p.pitch=-.35;
+ act(s,'p',{type:'tractorAttach',id:c.id});
+ p.pos=[1.5,0,3];c.pos=[1.5,0,1.5];c.angle=.8;
+ assert.equal(tractorSlot(s,c).valid,false);
+ assert.throws(()=>act(s,'p',{type:'tractorSecure'}),/green grid/);
+ c.angle=0;assert.equal(tractorSlot(s,c).valid,true);
+ act(s,'p',{type:'tractorSecure'});
+ assert.equal(c.state,'secured');assert.equal(c.container,'bay1');assert.equal(p.tractor,null);
 });
