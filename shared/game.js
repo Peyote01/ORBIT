@@ -146,7 +146,7 @@ export function facingClue(w){
 }
 function inWreck(p){return Math.abs(p.pos[0])<8&&p.pos[2]<-23&&p.pos[2]>-45&&p.pos[1]<7;}
 export function illegalValue(s,ids=null){return s.cargo.filter(c=>c.illegal&&c.state!=='lost'&&c.state!=='sold'&&c.state!=='destroyed'&&(!ids||ids.includes(c.id))).reduce((n,c)=>n+cargoValue(c),0);}
-function aboardCargo(s,c){return c.state==='secured'||(c.state==='held'&&onShip(s.players[c.carrier]||{pos:[99,99,99]}))||(c.state==='loose'&&onShip({pos:c.pos}));}
+function aboardCargo(s,c){return c.state==='secured'||(['held','tractored'].includes(c.state)&&onShip(s.players[c.carrier]||{pos:[99,99,99]}))||(c.state==='loose'&&onShip({pos:c.pos}));}
 export function policeScan(s){
  const rolls=new Map(),caught=[];
  for(const c of s.cargo){
@@ -238,6 +238,10 @@ export function setInput(s,id,input){
  p.input={x:clamp(finite(input.x)?input.x:0,-1,1),z:clamp(finite(input.z)?input.z:0,-1,1),y:clamp(finite(input.y)?input.y:0,-1,1),sprint:input.sprint===true};
  if(finite(input.yaw))p.yaw=input.yaw%(Math.PI*2);
  if(finite(input.pitch))p.pitch=clamp(input.pitch,-1.4,1.4);
+ if(p.tractor){
+  if(finite(input.tractorDistance))p.tractor.targetDistance=clamp(input.tractorDistance,2,TRACTOR_RANGE);
+  if(finite(input.tractorAngle))p.tractor.targetAngle=wrapAngle(input.tractorAngle);
+ }
  p.lastSeen=s.time;
 }
 export function act(s,id,a){
@@ -253,7 +257,7 @@ export function act(s,id,a){
   station(s,p,'nav');captain(s,p);assert(!s.transit&&!s.encounter,'Finish the current encounter first.');
   assert(!s.quota.due,'Quota due: sell and settle, or use your extension.');
   assert(Object.values(s.players).filter(p=>p.connected).every(onShip),'All connected crew must be aboard.');
-  assert(!s.cargo.some(c=>c.state==='held'),'Secure or drop carried cargo before departure.');
+  assert(!s.cargo.some(c=>['held','tractored'].includes(c.state)),'Secure or drop carried cargo before departure.');
   const target=a.id;assert(target!==s.location,'Already at this destination.');
   let fuel=10;
   if(!['A','B'].includes(target)){
@@ -292,6 +296,30 @@ export function act(s,id,a){
   assert(MODELS.some(m=>m.id===a.model),'Unknown model.');w.guess=a.model;
   log(s,'Crew hypothesis: '+MODELS.find(m=>m.id===a.model).name+'. Compare all five clues for certainty.');break;
  }
+ case 'tractorAttach':{
+  assert(s.phase==='salvage','Tractor salvage requires a wreck.');
+  assert(!p.held&&!p.tractor,'Release your current cargo first.');
+  const c=s.cargo.find(c=>c.id===a.id&&c.state==='loose');assert(c,'Cargo is not available.');
+  const center=[c.pos[0],c.pos[1]+c.dims[1]/2,c.pos[2]],origin=[p.pos[0],p.pos[1]+1.6,p.pos[2]];
+  const v=center.map((n,i)=>n-origin[i]),len=Math.hypot(...v);
+  assert(len>=.5&&len<=TRACTOR_RANGE,'Crate outside tractor range.');
+  const forward=[-Math.sin(p.yaw)*Math.cos(p.pitch),Math.sin(p.pitch),-Math.cos(p.yaw)*Math.cos(p.pitch)];
+  const dot=v.reduce((sum,n,i)=>sum+n*forward[i],0),perp=Math.sqrt(Math.max(0,len*len-dot*dot));
+  assert(dot>0&&perp<=Math.max(1,Math.max(...c.dims)*.6),'Aim directly at the crate.');
+  c.state='tractored';c.carrier=p.id;
+  p.tractor={id:c.id,distance:clamp(len,2,TRACTOR_RANGE),targetDistance:clamp(len,2,TRACTOR_RANGE),angle:c.angle||0,targetAngle:c.angle||0};
+  const w=requireActive(s);if(!c.salvaged){c.salvaged=true;w.taken=true;}break;
+ }
+ case 'tractorRelease':{assert(p.tractor,'No cargo attached.');releaseTractor(s,p);break;}
+ case 'tractorSecure':{
+  assert(p.tractor,'Attach cargo first.');assert(onShip(p),'Move into the cargo hold first.');
+  const c=s.cargo.find(c=>c.id===p.tractor.id&&c.carrier===p.id);assert(c,'Tractor attachment lost.');
+  assert(distance(p.pos,c.pos)<7,'Move closer to the crate.');
+  const slot=tractorSlot(s,c);assert(slot?.valid,'Move and rotate cargo onto a green grid space.');
+  c.state='secured';c.container=slot.container;c.cell=slot.cell;c.packedDims=slot.dims;
+  c.angle=Math.round(c.angle/(Math.PI/2))*(Math.PI/2);c.carrier=null;p.tractor=null;
+  log(s,GOODS[c.type].name+' secured in '+s.ship.containers.find(b=>b.id===slot.container).name+'.');break;
+ }
  case 'pickup':{
   assert(s.phase==='salvage','Cargo recovery is available at the wreck.');assert(!p.held,'Your hands are full.');
   const c=s.cargo.find(c=>c.id===a.id);assert(c&&c.state==='loose'&&distance(p.pos,c.pos)<4,'Move closer to an available crate.');
@@ -320,7 +348,7 @@ export function act(s,id,a){
   station(s,p,'scanner');captain(s,p);const w=requireActive(s);
   assert(w.grapple&&!w.crunched&&!w.crunchAt,'Lock an intact wreck first.');
   assert(Object.values(s.players).filter(p=>p.connected).every(onShip),'All crew must be aboard before Crunch.');
-  assert(!s.cargo.some(c=>c.state==='held'),'Put down carried cargo first.');
+  assert(!s.cargo.some(c=>['held','tractored'].includes(c.state)),'Put down carried cargo first.');
   w.crunchAt=s.time+3;log(s,'CRUNCH: blast shutters closed. Everything left inside will be destroyed.');break;
  }
  case 'sell':{
@@ -355,12 +383,12 @@ export function act(s,id,a){
    log(s,c.name+' shielding level '+c.shield+'. Capacity stays at 50% of standard.');break;
   }
   const u=UPGRADES[a.key];assert(u&&s.ship.upgrades[a.key]<u.max,'Upgrade unavailable.');
-  if(a.key==='hull')assert(!s.cargo.some(c=>c.state==='held'),'Secure cargo first.');
+  if(a.key==='hull')assert(!s.cargo.some(c=>['held','tractored'].includes(c.state)),'Secure cargo first.');
   const level=s.ship.upgrades[a.key];spend(s,u.cost*(level+1));s.ship.upgrades[a.key]++;
   if(a.key==='armor'){s.ship.maxHull+=50;s.ship.hull+=50;}
   if(a.key==='tank')s.ship.maxFuel+=50;
   if(a.key==='hull'){
-   assert(!s.cargo.some(c=>c.state==='held'),'Secure cargo first.');
+   assert(!s.cargo.some(c=>['held','tractored'].includes(c.state)),'Secure cargo first.');
    const replacement=makeShip(level+1);
    s.ship.containers.forEach((c,i)=>c.dims=replacement.containers[i].dims);
    s.ship.extensionAvailable=true; // A new hull is a new ship; other purchased upgrades transfer in this prototype.
@@ -494,7 +522,7 @@ export function tick(s,dt){
 export function snapshot(s){
  const w=s.activeWreck?s.wrecks[s.activeWreck]:null;
  const cargo=s.cargo.filter(c=>!['sold','lost','destroyed'].includes(c.state)&&
-  (c.state==='secured'||c.state==='held'||onShip({pos:c.pos})||c.source===s.activeWreck||c.source==='rival-'+s.activeWreck));
+  (c.state==='secured'||c.state==='held'||c.state==='tractored'||onShip({pos:c.pos})||c.source===s.activeWreck||c.source==='rival-'+s.activeWreck));
  return {version:VERSION,code:s.code,time:s.time,run:s.run,captain:s.captain,credits:s.credits,ship:s.ship,location:s.location,phase:s.phase,
  quota:s.quota,leads:s.leads.map(({goods,model,...l})=>l),players:Object.values(s.players).map(({input,...p})=>p),
  cargo,wreck:w?{...w,model:undefined,visual:{color:MODELS[w.model].color,thrusters:w.model===1?4:2},owner:Object.keys(w.clues).length>=3?w.owner:'Unidentified'}:null,
