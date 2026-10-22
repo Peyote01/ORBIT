@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createGame,addPlayer,leavePlayer,act,tick,STATIONS,settleQuota,holdDimensions,policeScan,detectionChance,fits,destroyShip,setInput,scrapCrates,volume,cargoValue,cargoPrice,tractorSlot} from '../shared/game.js';
+import {createGame,addPlayer,leavePlayer,act,tick,STATIONS,settleQuota,holdDimensions,policeScan,detectionChance,fits,destroyShip,setInput,scrapCrates,volume,cargoValue,cargoPrice,tractorSlot,REAR_HATCH,onShip,snapshot} from '../shared/game.js';
 function game(){const s=createGame('TEST',()=>.99);addPlayer(s,'p','Captain');return s;}
 function at(s,key){s.players.p.pos=[...STATIONS[key]];}
 function advance(s,n){for(let i=0;i<n*20;i++)tick(s,.05);}
@@ -116,4 +116,69 @@ test('disconnect automatically releases a tractor and preserves the loose crate'
  act(s,'p',{type:'tractorAttach',id:c.id});
  leavePlayer(s,'p');
  assert.equal(c.state,'loose');assert.equal(c.carrier,null);assert.equal(p.tractor,null);
+});
+
+test('rear hatch is synchronized, can be operated from inside or outside, and locks before travel',()=>{
+ const s=game();act(s,'p',{type:'accept',id:'free-a'});
+ at(s,'hatch');
+ assert.equal(s.ship.hatchOpen,false);
+ act(s,'p',{type:'cargoHatch'});
+ assert.equal(s.ship.hatchOpen,true);
+ assert.equal(snapshot(s).ship.hatchOpen,true);
+ at(s,'nav');
+ assert.throws(()=>act(s,'p',{type:'travel',id:'free-a'}),/Close the rear cargo hatch/);
+ s.players.p.pos=[0,0,12.5];
+ act(s,'p',{type:'cargoHatch'});
+ assert.equal(s.ship.hatchOpen,false);
+ at(s,'nav');act(s,'p',{type:'travel',id:'free-a'});
+ assert.equal(s.phase,'transit');
+ assert.throws(()=>act(s,'p',{type:'cargoHatch'}),/transit/);
+});
+test('open rear hatch lets players walk through aft bulkhead; closed hatch stops them',()=>{
+ const s=game();s.phase='salvage';
+ const p=s.players.p;p.pos=[0,0,9.5];
+ setInput(s,'p',{z:-1,yaw:0});
+ for(let i=0;i<12;i++)tick(s,.05);
+ assert.equal(onShip(p),true);
+ assert.ok(p.pos[2]<REAR_HATCH.z);
+ p.pos=[0,0,9.5];
+ act(s,'p',{type:'cargoHatch'});
+ for(let i=0;i<12;i++)tick(s,.05);
+ assert.equal(onShip(p),false);
+ assert.ok(p.pos[2]>REAR_HATCH.z);
+ // Entry from exterior uses the same portal.
+ setInput(s,'p',{z:1,yaw:0});
+ for(let i=0;i<12;i++)tick(s,.05);
+ assert.equal(onShip(p),true);
+});
+test('large crates can pass through the open rear hatch but not the closed rear wall',()=>{
+ const make=()=>{
+  const s=game();at(s,'board');act(s,'p',{type:'accept',id:'free-b'});at(s,'nav');act(s,'p',{type:'travel',id:'free-b'});advance(s,9);
+  const p=s.players.p,c=s.cargo[0];
+  // A 3x2x3 crate is wider than the narrow side airlock.
+  c.dims=[3,2,3];c.pos=[0,0,13.5];
+  p.pos=[0,0,9.3];p.yaw=Math.PI;p.pitch=-.14;
+  act(s,'p',{type:'tractorAttach',id:c.id});
+  return {s,p,c};
+ };
+ const closed=make();
+ setInput(closed.s,'p',{z:-1,yaw:Math.PI,pitch:-.14});
+ for(let i=0;i<27;i++)tick(closed.s,.05);
+ assert.ok(closed.c.pos[2]>REAR_HATCH.z,'Closed hatch must keep crate outside');
+ const opened=make();
+ act(opened.s,'p',{type:'cargoHatch'});
+ setInput(opened.s,'p',{z:-1,yaw:Math.PI,pitch:-.14});
+ for(let i=0;i<27;i++)tick(opened.s,.05);
+ assert.ok(opened.c.pos[2]<REAR_HATCH.z-1,'Open hatch must admit wide crate');
+});
+test('hatch cannot close through a crate or another crew member',()=>{
+ const s=game();s.phase='salvage';at(s,'hatch');act(s,'p',{type:'cargoHatch'});
+ s.cargo.push({id:'obstruction',type:'machinery',dims:[2,1,2],pos:[0,0,REAR_HATCH.z],state:'loose',angle:0});
+ assert.throws(()=>act(s,'p',{type:'cargoHatch'}),/crate is obstructing/);
+ s.cargo[0].pos=[0,0,4];
+ s.players.p.pos=[0,0,REAR_HATCH.z];
+ assert.throws(()=>act(s,'p',{type:'cargoHatch'}),/crew member/);
+ s.players.p.pos=[0,0,8.7];
+ act(s,'p',{type:'cargoHatch'});
+ assert.equal(s.ship.hatchOpen,false);
 });
