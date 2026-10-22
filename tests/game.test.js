@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createGame,addPlayer,act,tick,STATIONS,settleQuota,holdDimensions,policeScan,detectionChance,fits,destroyShip,setInput,scrapCrates,volume,cargoValue,cargoPrice,tractorSlot} from '../shared/game.js';
+import {createGame,addPlayer,leavePlayer,act,tick,STATIONS,settleQuota,holdDimensions,policeScan,detectionChance,fits,destroyShip,setInput,scrapCrates,volume,cargoValue,cargoPrice,tractorSlot} from '../shared/game.js';
 function game(){const s=createGame('TEST',()=>.99);addPlayer(s,'p','Captain');return s;}
 function at(s,key){s.players.p.pos=[...STATIONS[key]];}
 function advance(s,n){for(let i=0;i<n*20;i++)tick(s,.05);}
@@ -96,7 +96,7 @@ test('handheld tractor is exclusive, range-checked and releases cargo on disconn
  assert.equal(c.state,'tractored');
  act(s,'p',{type:'tractorRelease'});
  assert.equal(c.state,'loose');assert.equal(c.carrier,null);assert.equal(p.tractor,null);
- assert.throws(()=>act(s,'p',{type:'tractorAttach',id:c.id}),/outside tractor range|Aim directly|Crate outside|not available/);
+ p.pos=[40,0,0];assert.throws(()=>act(s,'p',{type:'tractorAttach',id:c.id}),/outside tractor range|Aim directly|Crate outside|not available/);
 });
 test('tractor can snap crates to grid; blocked and rotated placement is rejected',()=>{
  const s=game();act(s,'p',{type:'accept',id:'free-a'});at(s,'nav');act(s,'p',{type:'travel',id:'free-a'});advance(s,9);
@@ -108,4 +108,12 @@ test('tractor can snap crates to grid; blocked and rotated placement is rejected
  c.angle=0;assert.equal(tractorSlot(s,c).valid,true);
  act(s,'p',{type:'tractorSecure'});
  assert.equal(c.state,'secured');assert.equal(c.container,'bay1');assert.equal(p.tractor,null);
+});
+
+test('disconnect automatically releases a tractor and preserves the loose crate',()=>{
+ const s=game();act(s,'p',{type:'accept',id:'free-a'});at(s,'nav');act(s,'p',{type:'travel',id:'free-a'});advance(s,9);
+ const c=s.cargo[0],p=s.players.p;p.pos=[c.pos[0],0,c.pos[2]+3];p.pitch=-.35;
+ act(s,'p',{type:'tractorAttach',id:c.id});
+ leavePlayer(s,'p');
+ assert.equal(c.state,'loose');assert.equal(c.carrier,null);assert.equal(p.tractor,null);
 });
