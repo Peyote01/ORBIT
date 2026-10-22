@@ -1,14 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createGame,addPlayer,leavePlayer,act,tick,STATIONS,settleQuota,holdDimensions,policeScan,detectionChance,fits,destroyShip,setInput,scrapCrates,volume,cargoValue,cargoPrice,tractorSlot,cargoMoveValid,REAR_HATCH,onShip,snapshot,makeShip,rearHatchHeight} from '../shared/game.js';
+import {createGame,addPlayer,leavePlayer,act,tick,STATIONS,settleQuota,holdDimensions,policeScan,detectionChance,fits,destroyShip,setInput,scrapCrates,volume,cargoValue,cargoPrice,marketPrice,tractorSlot,cargoMoveValid,REAR_HATCH,onShip,snapshot,makeShip,rearHatchHeight} from '../shared/game.js';
 function game(){const s=createGame('TEST',()=>.99);addPlayer(s,'p','Captain');return s;}
 function at(s,key){s.players.p.pos=[...STATIONS[key]];}
 function advance(s,n){for(let i=0;i<n*20;i++)tick(s,.05);}
 test('free contract, travel, recovery, packing, sale and first day',()=>{
  const s=game();at(s,'board');act(s,'p',{type:'accept',id:'free-a'});at(s,'nav');act(s,'p',{type:'travel',id:'free-a'});advance(s,9);
  assert.equal(s.quota.days,0);assert.equal(s.phase,'salvage');at(s,'scanner');act(s,'p',{type:'grapple'});
- const c=s.cargo[0];s.players.p.pos=[...c.pos];act(s,'p',{type:'pickup',id:c.id});
- at(s,'cargo');act(s,'p',{type:'secure',container:'bay0'});assert.equal(c.state,'secured');
+ const c=s.cargo[0],p=s.players.p;
+ p.pos=[c.pos[0],0,c.pos[2]+3];p.pitch=-.35;
+ act(s,'p',{type:'tractorAttach',id:c.id});
+ p.pos=[-1.5,0,3];c.pos=[-1.5,0,1.5];c.angle=0;
+ assert.equal(tractorSlot(s,c)?.valid,true);
+ act(s,'p',{type:'tractorSecure'});assert.equal(c.state,'secured');
  at(s,'nav');act(s,'p',{type:'travel',id:'A'});advance(s,9);assert.equal(s.quota.days,1);
  at(s,'market');act(s,'p',{type:'sell',ids:[c.id]});assert.ok(s.credits>1000);
 });
@@ -50,8 +54,9 @@ test('contracts can be accepted during EVA; salvage needs neither scans nor grap
  const s=game();s.players.p.pos=[30,0,-20];act(s,'p',{type:'accept',id:'free-a'});
  at(s,'nav');act(s,'p',{type:'travel',id:'free-a'});advance(s,9);
  const w=s.wrecks[s.activeWreck];assert.equal(w.grapple,false);assert.equal(Object.keys(w.clues).length,0);
- const crate=s.cargo[0];s.players.p.pos=[...crate.pos];act(s,'p',{type:'pickup',id:crate.id});
- assert.equal(crate.carrier,'p');
+ const crate=s.cargo[0],p=s.players.p;p.pos=[crate.pos[0],0,crate.pos[2]+3];p.pitch=-.35;
+ act(s,'p',{type:'tractorAttach',id:crate.id});
+ assert.equal(crate.carrier,'p');assert.equal(crate.state,'tractored');
  act(s,'p',{type:'accept',id:'free-b'});assert.ok(s.leads.find(l=>l.id==='free-b').accepted);
 });
 test('sprint doubles speed, consumes stamina, exhausts and recovers',()=>{
@@ -239,4 +244,55 @@ test('floor snapping requires crate completely inside and never overlaps occupie
  const stacked=tractorSlot(s,c);
  assert.equal(stacked?.valid,true,'Magnetic placement finds a supported position above occupied floor');
  assert.equal(stacked?.cell[1],1,'Stack above the existing crate rather than overlapping it');
+});
+
+test('hand-carry pickup, inventory secure and manual drop actions are disabled',()=>{
+ const s=game();at(s,'board');act(s,'p',{type:'accept',id:'free-a'});
+ at(s,'nav');act(s,'p',{type:'travel',id:'free-a'});advance(s,9);
+ const c=s.cargo[0];s.players.p.pos=[...c.pos];
+ for(const type of ['pickup','drop','secure']){
+  assert.throws(()=>act(s,'p',{type,id:c.id,container:'bay0'}),/Unknown action/);
+ }
+ assert.equal(c.state,'loose');assert.equal(s.players.p.held,null);
+});
+test('32 cubic meter scrap fits exactly in empty starter bay after automatic 90-degree tip',()=>{
+ const s=game();s.phase='salvage';const p=s.players.p;
+ const c={id:'large-scrap',type:'scrap',dims:[4,2,4],pos:[1,.65,2],angle:0,state:'tractored',carrier:'p',illegal:false};
+ s.cargo.push(c);p.pos=[1,0,5];p.tractor={id:c.id,angle:0};
+ const slot=tractorSlot(s,c);
+ assert.equal(volume(c.dims),32);
+ assert.equal(volume(s.ship.containers[1].dims),32);
+ assert.equal(slot?.valid,true,'A 4x2x4 crate should tip into a 2x4x4 bay');
+ assert.equal(slot?.container,'bay1');
+ assert.deepEqual(slot?.dims,[2,4,4]);
+ assert.equal(slot?.autoRotate,true);
+ act(s,'p',{type:'tractorSecure'});
+ assert.equal(c.state,'secured');assert.equal(c.container,'bay1');assert.deepEqual(c.packedDims,[2,4,4]);
+ assert.equal(cargoPrice(s,c,'A'),Math.floor(marketPrice(s,'scrap','A')*8));
+});
+test('auto-orientation respects shielded capacity and occupied cargo',()=>{
+ const s=game();s.phase='salvage';const p=s.players.p;
+ s.ship.containers[0].shield=1;
+ const c={id:'large-scrap',type:'scrap',dims:[4,2,4],pos:[1,0,2],angle:0,state:'tractored',carrier:'p',illegal:false};
+ s.cargo.push(c);p.pos=[1,0,5];p.tractor={id:c.id};
+ assert.equal(tractorSlot(s,c)?.container,'bay1','A half-capacity shielded bay must be ignored');
+ s.cargo.push({id:'block',type:'alloy',dims:[1,1,1],pos:[1,0,0],state:'secured',container:'bay1',cell:[0,0,0],packedDims:[1,1,1]});
+ assert.equal(tractorSlot(s,c),null,'One occupied cubic meter prevents a full 32 m³ crate');
+ assert.throws(()=>act(s,'p',{type:'tractorSecure'}),/green floor\/grid slot/);
+});
+test('quota due permits returning to either market to sell, but blocks new wrecks',()=>{
+ for(const market of ['A','B']){
+  const s=game();at(s,'board');act(s,'p',{type:'accept',id:'free-a'});
+  at(s,'nav');act(s,'p',{type:'travel',id:'free-a'});advance(s,9);
+  const c=s.cargo[0];c.state='secured';c.container='bay1';c.cell=[0,0,0];c.packedDims=[...c.dims];
+  s.quota.days=7;s.quota.due=true;
+  assert.throws(()=>act(s,'p',{type:'travel',id:'free-b'}),/Quota due/);
+  at(s,'nav');act(s,'p',{type:'travel',id:market});advance(s,9);
+  assert.equal(s.location,market);assert.equal(s.phase,'docked');assert.equal(s.quota.due,true);
+  at(s,'market');act(s,'p',{type:'sell',ids:[c.id]});assert.equal(c.state,'sold');
+ }
+ const s=game();s.quota.due=true;at(s,'nav');
+ act(s,'p',{type:'travel',id:'B'});advance(s,9);
+ assert.equal(s.location,'B','Crew can switch markets while payment is due');
+ assert.equal(s.quota.due,true);
 });
