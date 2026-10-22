@@ -1,7 +1,9 @@
 # Manual acceptance checklist
 Record browser/device, steps, expected outcome and actual outcome for each failure.
 - Open public HTTPS URL in private windows on two separate devices/networks. Create/join room, verify both avatars move; fifth player is refused.
-- Recover at least two crates cooperatively; try simultaneous pickup of one crate. Exactly one carrier.
+- Recover at least two crates cooperatively using handheld tractor beams only; attempt simultaneous attachment to one crate. Exactly one tractor owner. Verify E near loose cargo never hand-picks it up and CARGO has no auto-stow button.
+- Tractor a 4×2×4 m (32 m³) scrap crate fully aboard and secure it in an empty 2×4×4 m starter bay. The green grid should appear and automatically tip it to 2×4×4; adding shielding or an occupied cell must block full-bay storage.
+- When quota becomes due at a wreck, return to either Market A or B and sell cargo; trying to depart to another wreck must be rejected.
 - Fit 1×1×1 and 2×1×2 crates; reject overlapping, unsupported and oversized placements. Check larger-hull visuals.
 - Read posters; scan three components, propose model, complete five scans. Ensure scanner closes and EVA remains usable.
 - Leave loot inside, Crunch, verify it is gone and only Scrap replaces the hull.

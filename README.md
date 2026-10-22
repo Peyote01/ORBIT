@@ -19,16 +19,16 @@ npx playwright test
 ```
 
 ## Controls and first mission
-WASD moves, click the scene to capture the mouse, Shift sprints, T equips or stows the tractor, left-click a loose crate to attach/release it (aim at its visible mesh), mouse wheel adjusts tractor distance, hold R while moving the mouse to rotate cargo, E locks an aligned crate when the cargo grid turns green, and Q/right-click releases the tractor. Existing E pickup/Q drop remains available when not attached. V scans, F fires a sidearm, Space/Ctrl moves vertically during EVA, Esc releases the cursor/closes panels. Captain is marked ★.
+WASD moves, click the scene to capture the mouse, Shift sprints, T equips or stows the tractor, left-click a loose crate to attach/release it (aim at its visible mesh), mouse wheel adjusts tractor distance, hold R while moving the mouse to rotate cargo, E locks an aligned crate when the cargo grid turns green, and Q/right-click releases the tractor. Hand-pickup and inventory auto-stow are disabled: all salvage uses the handheld tractor. V scans, F fires a sidearm, Space/Ctrl moves vertically during EVA, Esc releases the cursor/closes panels. Captain is marked ★.
 
 1. Walk to BOARD, press E, accept a free contract.
-2. Captain uses NAV to travel. Everyone must be aboard with no carried crates.
+2. Captain uses NAV to travel. Everyone must be aboard with no active tractor attachments.
 3. SCANNER: lock grapple; drag the scene to rotate; V scans one of five categories. Compare manufacturer records. Three matches are high confidence; five are certain.
-4. Exit the starboard rear airlock (right side near the back), move around the ship and approach the wreck. E recovers a crate.
-5. Guide it toward the starboard rear airlock with the tractor. Follow the physical doorway, position the crate inside the visible cargo bays, rotate until the placement indicator turns green, and press E to secure it. You can also use the original E pickup / CARGO auto-stow method. Cargo shape, support and overlap rules still matter; volume alone is insufficient.
+4. Exit the starboard rear airlock (right side near the back), move around the ship and approach the wreck. Aim at a loose crate and left-click to tractor it; E no longer picks up cargo.
+5. Guide it toward the starboard rear airlock with the tractor. Follow the physical doorway, position the crate inside the visible cargo bays, rotate until the placement indicator turns green, and press E to secure it. Cargo can only be secured by the tractor's green-grid preview. The placement system automatically tips crates 90 degrees if that is required to fit the bay. Cargo shape, support and overlap rules still matter; volume alone is insufficient.
 6. Return all crew aboard. Captain may Crunch: remaining contents are destroyed; the wreck becomes Scrap.
 7. Navigate to Market A or B. Compare prices, sell, refuel, repair, and upgrade.
-8. Pay a quota after seven travel days. One extension per ship grants seven more days for the same payment. Insufficient funds at settlement repossess the ship and reset cash to 1,000.
+8. At quota deadline, you may still fly to either Market A or B, sell goods, and settle your payment; additional wrecks are blocked until payment or extension. One extension per ship grants seven more days for the same payment. Insufficient funds at settlement repossess the ship and reset cash to 1,000.
 
 ## Public hosting
 Deploy the **entire Node application** to a host that supports long-running Node processes and WebSockets, with HTTPS and one server instance. Start command: `npm start`; service port: `PORT` (defaults to 3000); health endpoint: `/health`. Dockerfile included.
@@ -40,18 +40,11 @@ State is in memory: restarting the server resets all rooms. Empty rooms expire a
 ## Scope and limitations
 This is an intentionally small first prototype, not the full game. See [design](docs/design.md), [development plan](docs/development-plan.md), and [manual acceptance tests](docs/acceptance.md). Tests do not replace a remote two-person playtest.
 
-## Experimental tractor branch
-This feature is developed on `feature/handheld-tractor-cargo` to preserve the older prototype. To test it locally from an existing checkout:
-```sh
-git fetch origin
-git switch feature/handheld-tractor-cargo
-npm install
-npm start
-```
-Visit http://localhost:3000 and enable Chrome graphics acceleration for smooth 3D rendering. Use a free contract, fly to a wreck, target a loose crate with the center crosshair and left-click. Server validation prevents attaching the same crate twice or moving it through other crates. The starboard rear airlock is the intended cargo entrance; large crates may be too wide for the starter hold. Beam motion uses server snapshots, so connection quality affects smoothness. New tractor code is experimental and has not received a full remote human playtest.
-
 ## Aft cargo hatch (rear loading)
 The back of the ship (positive Z, opposite the bridge) has two retractable bulkhead doors and a loading apron. Press **H** near the aft switch or cargo console to toggle it; **E** at the hatch switch also works. The cargo console includes an Open/Close button. Move bulky cargo through the open rear entrance with the tractor, rotate to fit the available cargo hold, and press E when the grid preview is green. The side EVA airlock remains available for players and smaller crates. Close the rear hatch before flying to the next location. Door closure is blocked if a crate or player occupies the entrance. Cargo that exceeds the starter ship's actual hold dimensions remains oversized and cannot be secured even if it passes through the doorway.
 
 ## Cargo handling refinement
 The aft door now tests the **entire crate footprint throughout its crossing**, so crates no longer meet an invisible barrier midway through an otherwise open rear hatch. Keep a crate centered in the doorway and ensure its rotated width/height fit the hatch. Once the entire crate has cleared the rear wall, guide it near a clear cargo bay and press **E** when a green preview appears. Placement now uses a short-range magnetic assist to align the crate and settle it onto a supported floor cell (or onto a stable stack); it does not require pixel-perfect alignment or manual lowering to Y=0. The assist cannot pull cargo across the rear wall or through other crates, and the ship's actual hold capacity still applies.
+
+## Tractor-only storage and full-capacity crates
+All cargo is acquired by aiming and left-clicking with the handheld tractor. The hand-carry, Q drop and CARGO auto-stow inventory actions have been removed. A crate must be fully aboard and close to an unoccupied supported bay slot before E will secure it. The grid can automatically tip a box upright when required by bay geometry, e.g. a **4×2×4 m (32 m³)** scrap crate in a starter bay sized **2×4×4 m (32 m³)**. Shielding reduces effective bay height and can prevent full-volume placement. While quota payment is due, a captain may return to either market to sell salvage, but cannot travel to new salvage coordinates without paying or using an extension.

@@ -249,6 +249,21 @@ export function cargoMoveValid(s,c,from,pos){
 }
 // Assist a floor/grid drop without teleporting cargo through the ship's hull.
 // E uses the closest supported physical bay cell within a short magnetic radius.
+// A full bay is defined by its dimensions, not by volume alone.
+// The cargo grid automatically rolls/tips a loose crate when a 90-degree
+// orientation is necessary (e.g. 4x2x4 scrap into a 2x4x4 starter bay).
+// These are the six axis-aligned box orientations; invalid ones never fit().
+function cargoOrientations(c){
+ const [x,y,z]=c.dims,swap=Math.abs(Math.round((c.angle||0)/(Math.PI/2))%2)===1;
+ const yawDims=swap?[z,y,x]:[x,y,z];
+ const base=[{dims:yawDims,autoRotate:false}];
+ const seen=new Set([yawDims.join(',')]);
+ for(const dims of [[x,y,z],[z,y,x],[x,z,y],[y,x,z],[y,z,x],[z,x,y]]){
+  const key=dims.join(',');
+  if(!seen.has(key)){seen.add(key);base.push({dims,autoRotate:dims[1]!==y});}
+ }
+ return base;
+}
 export function tractorSlot(s,c){
  if(!c||c.state!=='tractored')return null;
  const d=boxDims(c);
@@ -258,23 +273,26 @@ export function tractorSlot(s,c){
  if(!fullyInside)return null;
  const quarter=Math.PI/2,turn=Math.round((c.angle||0)/quarter);
  const mismatch=Math.abs(wrapAngle((c.angle||0)-turn*quarter));
- const dims=Math.abs(turn%2)===1?[c.dims[2],c.dims[1],c.dims[0]]:[...c.dims];
  const MAX_SNAP=2.6,MAX_ANGLE=.62;
  let best=null;
  for(let i=0;i<s.ship.containers.length;i++){
   const bay=s.ship.containers[i],bounds=holdDimensions(bay),origin=i===0?-bay.dims[0]:0;
-  for(let y=0;y<=bounds[1]-dims[1];y++)
-   for(let z=0;z<=bounds[2]-dims[2];z++)
-    for(let x=0;x<=bounds[0]-dims[0];x++){
-     const cell=[x,y,z];
-     if(!fits(s,c,bay.id,cell,dims))continue;
-     const pos=[origin+x+dims[0]/2,y,z+dims[2]/2];
-     const offset=distance(c.pos,pos);
-     if(offset>MAX_SNAP)continue;
-     const valid=mismatch<=MAX_ANGLE,score=offset+y*.12;
-     if(!best||(valid&&!best.valid)||(valid===best.valid&&score<best.score))
-      best={container:bay.id,cell,dims,pos,valid,offset,score};
-    }
+  for(const orientation of cargoOrientations(c)){
+   const {dims,autoRotate}=orientation;
+   if(dims.some((v,axis)=>v>bounds[axis]))continue;
+   for(let y=0;y<=bounds[1]-dims[1];y++)
+    for(let z=0;z<=bounds[2]-dims[2];z++)
+     for(let x=0;x<=bounds[0]-dims[0];x++){
+      const cell=[x,y,z];
+      if(!fits(s,c,bay.id,cell,dims))continue;
+      const pos=[origin+x+dims[0]/2,y,z+dims[2]/2];
+      const offset=distance(c.pos,pos);
+      if(offset>MAX_SNAP)continue;
+      const valid=mismatch<=MAX_ANGLE,score=offset+y*.12+(autoRotate?.18:0);
+      if(!best||(valid&&!best.valid)||(valid===best.valid&&score<best.score))
+       best={container:bay.id,cell,dims,pos,valid,offset,score,autoRotate};
+     }
+  }
  }
  return best;
 }
@@ -301,7 +319,7 @@ export function act(s,id,a){
  case 'travel':{
   station(s,p,'nav');captain(s,p);
   assert(!s.ship.hatchOpen,'Close the rear cargo hatch before travel.');assert(!s.transit&&!s.encounter,'Finish the current encounter first.');
-  assert(!s.quota.due,'Quota due: sell and settle, or use your extension.');
+  assert(!s.quota.due||['A','B'].includes(a.id),'Quota due: return to Market A or B to sell and settle, or use your extension.');
   assert(Object.values(s.players).filter(p=>p.connected).every(onShip),'All connected crew must be aboard.');
   assert(!s.cargo.some(c=>['held','tractored'].includes(c.state)),'Secure or drop carried cargo before departure.');
   const target=a.id;assert(target!==s.location,'Already at this destination.');
@@ -382,25 +400,6 @@ export function act(s,id,a){
   c.state='secured';c.container=slot.container;c.cell=slot.cell;c.packedDims=slot.dims;
   c.angle=Math.round(c.angle/(Math.PI/2))*(Math.PI/2);c.carrier=null;p.tractor=null;
   log(s,GOODS[c.type].name+' secured in '+s.ship.containers.find(b=>b.id===slot.container).name+'.');break;
- }
- case 'pickup':{
-  assert(s.phase==='salvage','Cargo recovery is available at the wreck.');assert(!p.held,'Your hands are full.');
-  const c=s.cargo.find(c=>c.id===a.id);assert(c&&c.state==='loose'&&distance(p.pos,c.pos)<4,'Move closer to an available crate.');
-  const w=requireActive(s);assert(!w.crunchAt,'Crunch is underway.');
-  c.state='held';c.carrier=p.id;p.held=c.id;
-  if(!c.salvaged){c.salvaged=true;w.taken=true;}break;
- }
- case 'drop':{
-  const c=s.cargo.find(c=>c.id===p.held);assert(c,'Not carrying cargo.');
-  c.state='loose';c.pos=[p.pos[0]-Math.sin(p.yaw)*2,Math.max(0,p.pos[1]),p.pos[2]-Math.cos(p.yaw)*2];c.carrier=null;p.held=null;break;
- }
- case 'secure':{
-  station(s,p,'cargo');const c=s.cargo.find(c=>c.id===p.held);assert(c,'Carry a crate to the cargo grid first.');
-  const box=s.ship.containers.find(b=>b.id===a.container);assert(box,'Select a cargo bay.');
-  const slot=a.cell?{cell:a.cell,dims:a.dims||c.dims}:findSlot(s,c,box.id);
-  assert(slot&&fits(s,c,box.id,slot.cell,slot.dims),'Crate will not fit there. Check dimensions, support, and free volume.');
-  c.state='secured';c.container=box.id;c.cell=slot.cell;c.packedDims=slot.dims;c.carrier=null;p.held=null;
-  log(s,GOODS[c.type].name+' secured in '+box.name+'.');break;
  }
  case 'jettison':{
   station(s,p,'cargo');const c=s.cargo.find(c=>c.id===a.id&&c.state==='secured');assert(c,'Cargo not secured.');
