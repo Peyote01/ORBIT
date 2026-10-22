@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createGame,addPlayer,leavePlayer,act,tick,STATIONS,settleQuota,holdDimensions,policeScan,detectionChance,fits,destroyShip,setInput,scrapCrates,volume,cargoValue,cargoPrice,tractorSlot,REAR_HATCH,onShip,snapshot} from '../shared/game.js';
+import {createGame,addPlayer,leavePlayer,act,tick,STATIONS,settleQuota,holdDimensions,policeScan,detectionChance,fits,destroyShip,setInput,scrapCrates,volume,cargoValue,cargoPrice,tractorSlot,REAR_HATCH,onShip,snapshot,makeShip,rearHatchHeight} from '../shared/game.js';
 function game(){const s=createGame('TEST',()=>.99);addPlayer(s,'p','Captain');return s;}
 function at(s,key){s.players.p.pos=[...STATIONS[key]];}
 function advance(s,n){for(let i=0;i<n*20;i++)tick(s,.05);}
@@ -181,4 +181,22 @@ test('hatch cannot close through a crate or another crew member',()=>{
  s.players.p.pos=[0,0,8.7];
  act(s,'p',{type:'cargoHatch'});
  assert.equal(s.ship.hatchOpen,false);
+});
+
+test('upgraded ship hatch admits full-size reactor crate and grid can secure it',()=>{
+ const s=game();at(s,'board');act(s,'p',{type:'accept',id:'free-a'});
+ at(s,'nav');act(s,'p',{type:'travel',id:'free-a'});advance(s,9);
+ const upgraded=makeShip(2);s.ship.upgrades.hull=2;s.ship.containers=upgraded.containers;
+ assert.equal(rearHatchHeight(s),4.2);
+ const p=s.players.p,c=s.cargo[0];c.dims=[4,4,8];c.pos=[0,0,16];
+ p.pos=[0,0,9.2];p.yaw=Math.PI;p.pitch=.06;
+ act(s,'p',{type:'tractorAttach',id:c.id});
+ act(s,'p',{type:'cargoHatch'});
+ setInput(s,'p',{z:-1,yaw:Math.PI,pitch:.06});
+ for(let i=0;i<40;i++)tick(s,.05);
+ assert.ok(c.pos[2]<REAR_HATCH.z-4,'Reactor must fully clear upgraded aft doorway');
+ p.pos=[-2,0,5];c.pos=[-2,0,4];c.angle=0;
+ const slot=tractorSlot(s,c);assert.equal(slot?.valid,true);
+ act(s,'p',{type:'tractorSecure'});
+ assert.equal(c.state,'secured');assert.equal(c.container,'bay0');
 });
