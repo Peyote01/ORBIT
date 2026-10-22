@@ -183,6 +183,7 @@ function resetRun(s){
  log(s,'REPOSSESSED. Fresh starter ship; shared account reset to 1,000 credits.');
 }
 export function destroyShip(s){
+ for(const p of Object.values(s.players))releaseTractor(s,p);
  const fine=s.encounter?.fine||0;s.credits=Math.max(0,s.credits-fine);
  s.ship=makeShip();for(const c of s.cargo)if(aboardCargo(s,c))c.state='lost';
  s.cargo=s.cargo.filter(c=>!['lost','sold','destroyed'].includes(c.state));
@@ -477,7 +478,9 @@ export function tick(s,dt){
    const t=p.tractor,c=s.cargo.find(c=>c.id===t.id);
    if(!c||c.state!=='tractored'||c.carrier!==p.id){p.tractor=null;continue;}
    t.distance+=clamp(t.targetDistance-t.distance,-5*dt,5*dt);
+   const oldAngle=c.angle||0;
    t.angle=wrapAngle(t.angle+clamp(wrapAngle(t.targetAngle-t.angle),-4*dt,4*dt));c.angle=t.angle;
+   if(!cargoMoveValid(s,c,c.pos,c.pos)){c.angle=oldAngle;t.angle=oldAngle;}
    const dir=[-Math.sin(p.yaw)*Math.cos(p.pitch),Math.sin(p.pitch),-Math.cos(p.yaw)*Math.cos(p.pitch)];
    const wanted=[p.pos[0]+dir[0]*t.distance,p.pos[1]+1.6+dir[1]*t.distance-c.dims[1]/2,p.pos[2]+dir[2]*t.distance];
    const diff=wanted.map((n,i)=>n-c.pos[i]),len=Math.hypot(...diff),ratio=len?Math.min(1,TRACTOR_SPEED*dt/len):0;
@@ -513,6 +516,7 @@ export function tick(s,dt){
     if(p.hp<=0){
      p.stamina=100;p.sprintExhausted=false;
      if(p.held){const c=s.cargo.find(c=>c.id===p.held);if(c){c.state='loose';c.carrier=null;c.pos=[...p.pos];}p.held=null;}
+     releaseTractor(s,p);
      p.pos=[2.8,0,6];p.hp=100;log(s,p.name+' recovered in the ship medbay; carried cargo left behind.');
     }
    }
