@@ -108,3 +108,26 @@ test('handheld tractor locks visible cargo and synchronizes input with the serve
   expect(errors).toEqual([]);
  }finally{await context.close();await app.close();}
 });
+
+test('rear cargo hatch toggles for the crew and its status is visible in the HUD',async({browser})=>{
+ const {startServer}=await import('../server/index.js');
+ const {STATIONS}=await import('../shared/game.js');
+ const {once}=await import('node:events');
+ const app=startServer(0);await once(app.server,'listening');
+ const context=await browser.newContext(),page=await context.newPage(),errors=[];
+ page.on('pageerror',e=>errors.push(e.message));
+ try{
+  await page.goto('http://127.0.0.1:'+app.server.address().port);
+  await page.getByRole('button',{name:'START A CREW'}).click();
+  await expect(page.locator('#room-code')).toHaveText(/^[A-F0-9]{6}$/);
+  const code=await page.locator('#room-code').innerText(),game=app.rooms.get(code),player=game.players[game.captain];
+  player.pos=[...STATIONS.hatch];
+  await page.keyboard.press('h');
+  await expect.poll(()=>game.ship.hatchOpen).toBe(true);
+  await expect(page.locator('#hud')).toContainText('AFT HATCH OPEN');
+  await page.keyboard.press('h');
+  await expect.poll(()=>game.ship.hatchOpen).toBe(false);
+  await expect(page.locator('#hud')).toContainText('AFT HATCH CLOSED');
+  expect(errors).toEqual([]);
+ }finally{await context.close();await app.close();}
+});

@@ -48,7 +48,7 @@ const htmlCache=new Map();
 function setHTML(id,html){if(htmlCache.get(id)!==html){$(id).innerHTML=html;htmlCache.set(id,html);}}
 function render(){
  const p=me();if(!p)return;
- setHTML('hud','<strong>ORBIT / '+esc(state.code)+'</strong><span>CREW <b>'+state.players.filter(p=>p.connected).length+'/4</b></span><span>₡ <b>'+state.credits+'</b></span><span>FUEL '+state.ship.fuel+'/'+state.ship.maxFuel+'</span><span>HULL '+state.ship.hull+'/'+state.ship.maxHull+'</span><span>DAY <b>'+state.quota.days+'/'+state.quota.limit+'</b> · QUOTA ₡'+state.quota.amount+(state.quota.due?' · PAYMENT DUE':'')+'</span>');
+ setHTML('hud','<strong>ORBIT / '+esc(state.code)+'</strong><span>CREW <b>'+state.players.filter(p=>p.connected).length+'/4</b></span><span>₡ <b>'+state.credits+'</b></span><span>FUEL '+state.ship.fuel+'/'+state.ship.maxFuel+'</span><span>HULL '+state.ship.hull+'/'+state.ship.maxHull+'</span><span>AFT HATCH <b>'+(state.ship.hatchOpen?'OPEN':'CLOSED')+'</b></span><span>DAY <b>'+state.quota.days+'/'+state.quota.limit+'</b> · QUOTA ₡'+state.quota.amount+(state.quota.due?' · PAYMENT DUE':'')+'</span>');
  setHTML('crew',state.players.map(p=>esc(p.name)+(p.id===state.captain?' ★':'')+' · '+(p.connected?p.hp+' HP':'offline')).join('<br>')+'<br><br>'+state.phase.toUpperCase()+' / '+esc(state.location)+(state.encounter?'<br>'+state.encounter.type.toUpperCase()+' · '+state.encounter.stage+'<br>'+Math.max(0,Math.ceil((state.encounter.until||state.time)-state.time))+' sec · HP '+state.encounter.hp:''));
  setHTML('logs',state.log.slice(0,5).map(l=>'<div>'+esc(l.text)+'</div>').join(''));
  $('shutter').hidden=!state.wreck?.crunchAt;
@@ -58,7 +58,7 @@ function render(){
  const slot=attached?tractorSlot(state,attached):null;
  $('placement').textContent=attached?(slot?(slot.valid?'GREEN GRID · E TO SECURE':'RED GRID · ADJUST CARGO'):'MOVE CRATE INTO CARGO BAY'):'';
  $('placement').className=slot?.valid?'valid':slot?'invalid':'';
- $('prompt').textContent=panel?'':p.held?'Carrying '+GOODS[state.cargo.find(c=>c.id===p.held)?.type]?.name+' · E at cargo console to stow · Q drop':near?'E · '+near.label:'Starboard rear airlock → EVA to wreck';
+ $('prompt').textContent=panel?'':p.held?'Carrying '+GOODS[state.cargo.find(c=>c.id===p.held)?.type]?.name+' · E at cargo console to stow · Q drop':near?'E · '+(near.key==='hatch'?(state.ship.hatchOpen?'Close rear cargo hatch':'Open rear cargo hatch'):near.label):'Rear cargo hatch: H at aft switch · EVA through side airlock';
  if(panel)renderPanel();
  $('room-code').textContent=state.code;$('quick-actions').hidden=false;
  $('stamina').textContent='STAMINA '+Math.round(p.stamina??100)+'%'+(p.sprintExhausted?' · recovering':'');
@@ -73,7 +73,7 @@ function renderPanel(){
  if(!panel||!state)return;const p=me(),w=state.wreck;let html='<button data-close>← BACK TO DECK</button><h2>'+panel.toUpperCase()+'</h2>';
  if(panel==='board')html+='<p>Accept contracts anywhere with C. Start with free contracts. Purchases use the shared account. Coordinates without rights produce illegal salvage.</p>'+state.leads.map(l=>'<article><strong>'+esc(l.name)+'</strong><p>'+esc(l.owner)+' · '+l.range+' fuel · '+esc(l.threat)+'</p>'+btn(l.accepted?'ACCEPTED':l.cost?'Buy · ₡'+l.cost:'Accept · FREE','accept',{id:l.id})+'</article>').join('');
  if(panel==='nav'){
-  html+='<p>Captain commits travel. All crew must be aboard and crates put down. First station departure each quota is free; subsequent station departures and leaving salvaged wrecks cost one day.</p>';
+  html+='<p>Close the rear cargo hatch before departure. Captain commits travel. All crew must be aboard and crates put down. First station departure each quota is free; subsequent station departures and leaving salvaged wrecks cost one day.</p>';
   for(const target of [{id:'A',name:'Market A · industrial premium'},{id:'B',name:'Market B · technical / restricted'},...state.leads.filter(l=>l.accepted)])html+=btn('Travel: '+target.name,'travel',{id:target.id});
   html+='<article>'+btn('Ship cannon','shipfire')+btn('Boost escape · 10 fuel','boost')+btn('Pay police fine · ₡'+(state.encounter?.fine||0),'payfine')+btn('Fight police · 30s distress clock','fight')+'</article>';
   if(state.quota.due)html+=btn('Use one extension · +7 days, same quota','extend');
@@ -90,7 +90,7 @@ function renderPanel(){
  }
  if(panel==='poster')html+='<p>Compare these manufacturer records to scanned clues. Cargo values are estimates, not guaranteed profit.</p>'+catalog(w);
  if(panel==='cargo'){
-  html+='<p>Crates occupy real grid cells. Auto-stow finds a supported position; dimensions and shape must fit. Shielding protects only crates in that bay.</p>';
+  html+='<p>The wide rear hatch admits bulky cargo that cannot pass the starboard side airlock. Walk to the rear/cargo console, use H or the button below to operate it. Close the hatch before travel. The starter bay still has finite crate-size limits.</p>'+btn(state.ship.hatchOpen?'Close rear cargo hatch':'Open rear cargo hatch','cargoHatch')+'<p>Crates occupy real grid cells. Auto-stow finds a supported position; dimensions and shape must fit. Shielding protects only crates in that bay.</p>';
   for(const b of state.ship.containers){const d=holdDimensions(b),used=state.cargo.filter(c=>c.state==='secured'&&c.container===b.id).reduce((n,c)=>n+volume(c.dims),0);html+='<article><strong>'+b.name+' · '+used+'/'+volume(d)+' m³</strong><p>'+d.join('×')+'m · Shield '+b.shield+' · Detection '+Math.round(100*2**-b.shield)+'%</p>'+btn('Stow carried crate','secure',{container:b.id})+'</article>';}
   html+=state.cargo.filter(c=>c.state==='secured').map(c=>'<article>'+GOODS[c.type].name+' · '+c.dims.join('×')+'m'+(c.illegal?' · ILLEGAL':'')+btn('Jettison','jettison',{id:c.id})+'</article>').join('');
  }
@@ -148,8 +148,9 @@ window.addEventListener('keydown',e=>{
  if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))return;
  keys[e.code]=true;if(['Space','Tab'].includes(e.code))e.preventDefault();if(e.repeat)return;
  if(e.code==='Escape'){openPanel(null);keys={};}
- if(e.code==='KeyE'){if(panel){openPanel(null);return;}if(me()?.tractor){action('tractorSecure');return;}const n=nearest();if(n?.cargo)action('pickup',{id:n.cargo});else if(n)openPanel(n.key);}
+ if(e.code==='KeyE'){if(panel){openPanel(null);return;}if(me()?.tractor){action('tractorSecure');return;}const n=nearest();if(n?.cargo)action('pickup',{id:n.cargo});else if(n?.key==='hatch')action('cargoHatch');else if(n)openPanel(n.key);}
  if(e.code==='KeyC')openPanel(panel==='board'?null:'board');
+ if(e.code==='KeyH')action('cargoHatch');
  if(e.code==='KeyT'){
   tractorEquipped=!tractorEquipped;
   if(!tractorEquipped&&me()?.tractor)action('tractorRelease');
