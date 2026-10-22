@@ -49,3 +49,6 @@ npm install
 npm start
 ```
 Visit http://localhost:3000 and enable Chrome graphics acceleration for smooth 3D rendering. Use a free contract, fly to a wreck, target a loose crate with the center crosshair and left-click. Server validation prevents attaching the same crate twice or moving it through other crates. The starboard rear airlock is the intended cargo entrance; large crates may be too wide for the starter hold. Beam motion uses server snapshots, so connection quality affects smoothness. New tractor code is experimental and has not received a full remote human playtest.
+
+## Aft cargo hatch (rear loading)
+The back of the ship (positive Z, opposite the bridge) has two retractable bulkhead doors and a loading apron. Press **H** near the aft switch or cargo console to toggle it; **E** at the hatch switch also works. The cargo console includes an Open/Close button. Move bulky cargo through the open rear entrance with the tractor, rotate to fit the available cargo hold, and press E when the grid preview is green. The side EVA airlock remains available for players and smaller crates. Close the rear hatch before flying to the next location. Door closure is blocked if a crate or player occupies the entrance. Cargo that exceeds the starter ship's actual hold dimensions remains oversized and cannot be secured even if it passes through the doorway.
