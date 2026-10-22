@@ -56,7 +56,7 @@ function render(){
  $('tractor-status').textContent=tractorEquipped?(attached?'TRACTOR LOCKED · '+attached.type.toUpperCase()+' · '+beamDistance.toFixed(1)+'m':'TRACTOR READY [T]'):'TRACTOR STOWED [T]';
  $('tractor-status').classList.toggle('active',!!attached);
  const slot=attached?tractorSlot(state,attached):null;
- $('placement').textContent=attached?(slot?(slot.valid?'GREEN GRID · E TO SECURE':'RED GRID · ADJUST CARGO'):'MOVE CRATE INTO CARGO BAY'):'';
+ $('placement').textContent=attached?(slot?(slot.valid?'GREEN GRID · E TO MAGNETICALLY SECURE':'RED GRID · ROTATE TO ALIGN'):attached.pos[2]>7?'CLEAR REAR HATCH · PULL ENTIRE CRATE INTO HOLD':'MOVE CARGO NEAR AN OPEN FLOOR SLOT'):'';
  $('placement').className=slot?.valid?'valid':slot?'invalid':'';
  $('prompt').textContent=panel?'':p.held?'Carrying '+GOODS[state.cargo.find(c=>c.id===p.held)?.type]?.name+' · E at cargo console to stow · Q drop':near?'E · '+(near.key==='hatch'?(state.ship.hatchOpen?'Close rear cargo hatch':'Open rear cargo hatch'):near.label):'Rear cargo hatch: H at aft switch · EVA through side airlock';
  if(panel)renderPanel();
