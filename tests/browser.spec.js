@@ -154,3 +154,26 @@ test('green cargo placement magnetically locks hovering freight using E in the b
   expect(errors).toEqual([]);
  }finally{await context.close();await app.close();}
 });
+
+test('starter 32 m3 bay shows auto-tip tractor placement and secures with E',async({browser})=>{
+ const {startServer}=await import('../server/index.js');
+ const {once}=await import('node:events');
+ const app=startServer(0);await once(app.server,'listening');
+ const context=await browser.newContext(),page=await context.newPage(),errors=[];
+ page.on('pageerror',e=>errors.push(e.message));
+ try{
+  await page.goto('http://127.0.0.1:'+app.server.address().port);
+  await page.getByRole('button',{name:'START A CREW'}).click();
+  await expect(page.locator('#room-code')).toHaveText(/^[A-F0-9]{6}$/);
+  const code=await page.locator('#room-code').innerText(),s=app.rooms.get(code),p=s.players[s.captain];
+  s.phase='salvage';p.pos=[1,0,5];
+  const c={id:'full-bay-browser',type:'scrap',dims:[4,2,4],pos:[1,.65,2],angle:0,state:'tractored',carrier:p.id,illegal:false};
+  s.cargo.push(c);p.tractor={id:c.id,distance:4,targetDistance:4,angle:0,targetAngle:0};
+  await expect(page.locator('#placement')).toContainText('E TO TIP & SECURE');
+  await page.keyboard.press('e');
+  await expect.poll(()=>c.state).toBe('secured');
+  expect(c.packedDims).toEqual([2,4,4]);
+  expect(c.container).toBe('bay1');
+  expect(errors).toEqual([]);
+ }finally{await context.close();await app.close();}
+});
