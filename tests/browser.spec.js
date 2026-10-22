@@ -87,6 +87,7 @@ test('handheld tractor locks visible cargo and synchronizes input with the serve
  try{
   await page.goto('http://127.0.0.1:'+app.server.address().port);
   await page.getByRole('button',{name:'START A CREW'}).click();
+  await expect(page.locator('#room-code')).toHaveText(/^[A-F0-9]{6}$/);
   const code=await page.locator('#room-code').innerText(),s=app.rooms.get(code),id=s.captain;
   act(s,id,{type:'accept',id:'free-a'});
   s.players[id].pos=[...STATIONS.nav];act(s,id,{type:'travel',id:'free-a'});
