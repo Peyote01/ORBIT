@@ -199,7 +199,11 @@ function beginEncounter(s){
 // Tractor cargo has server-owned bottom-center world coordinates.
 const TRACTOR_RANGE=14, TRACTOR_SPEED=18;
 const wrapAngle=a=>Math.atan2(Math.sin(a),Math.cos(a));
-function releaseTractor(s,p){if(!p.tractor)return;const c=s.cargo.find(c=>c.id===p.tractor.id);if(c&&c.state==='tractored'&&c.carrier===p.id){c.state='loose';c.carrier=null;c.pos[1]=Math.max(0,c.pos[1]);}p.tractor=null;}
+function releaseTractor(s,p){if(!p.tractor)return;const c=s.cargo.find(c=>c.id===p.tractor.id);if(c&&c.state==='tractored'&&c.carrier===p.id){
+ c.state='loose';c.carrier=null;
+ if(onShip({pos:c.pos})){c.pos[1]=0;c.velocity=null;}
+ else c.velocity=[-Math.sin(p.yaw)*.22,0,-Math.cos(p.yaw)*.22];
+}p.tractor=null;}
 const boxDims=c=>{const a=wrapAngle(c.angle||0),x=c.dims[0],z=c.dims[2];return [Math.abs(Math.cos(a))*x+Math.abs(Math.sin(a))*z,c.dims[1],Math.abs(Math.sin(a))*x+Math.abs(Math.cos(a))*z];};
 function cargoMoveValid(s,c,from,pos){
  if(!pos.every(finite)||pos[1]<0||pos[1]+c.dims[1]>18||Math.abs(pos[0])>65||pos[2]<-65||pos[2]>30)return false;
@@ -230,7 +234,7 @@ export function tractorSlot(s,c){
   const pos=[origin+cell[0]+dims[0]/2,cell[1],cell[2]+dims[2]/2],offset=distance(c.pos,pos);
   if(offset>1.1||c.pos[2]<-1||c.pos[2]>bay.dims[2]+1)continue;
   const valid=mismatch<.23&&offset<=.65&&fits(s,c,bay.id,cell,dims);
-  if(!best||offset<best.offset)best={container:bay.id,cell,dims,pos,valid,offset};
+  if(!best||(valid&&!best.valid)||(valid===best.valid&&offset<best.offset))best={container:bay.id,cell,dims,pos,valid,offset};
  }
  return best;
 }
@@ -492,6 +496,11 @@ export function tick(s,dt){
    const c=makeCargo(s,'scrap',w.id,[scrapX+dims[0]/2,0,-30],w.legal);c.dims=dims;scrapX+=dims[0]+1;
   }
   log(s,'Crunch complete. Wreck contents destroyed; Scrap ready for collection.');
+ }
+ for(const c of s.cargo){
+  if(c.state!=='loose'||!c.velocity)continue;
+  const next=c.pos.map((n,i)=>n+c.velocity[i]*dt);
+  if(cargoMoveValid(s,c,c.pos,next))c.pos=next;else c.velocity=null;
  }
  if(s.phase==='salvage'&&w&&!w.crunched){
   for(const e of w.enemies.filter(e=>e.hp>0)){
