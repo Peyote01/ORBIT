@@ -25,8 +25,9 @@ export const UPGRADES = {
 };
 export const STATIONS = {
  board:[-3,0,-2],nav:[0,0,-8],scanner:[3,0,-6],
- market:[3,0,1],engineering:[-3,0,3],poster:[-3,0,-6],cargo:[0,0,3]
+ market:[3,0,1],engineering:[-3,0,3],poster:[-3,0,-6],cargo:[0,0,3],hatch:[0,0,8.7]
 };
+export const REAR_HATCH = {z:10.4,width:8.2,height:3.2};
 export const volume = d => d[0]*d[1]*d[2];
 export const detectionChance = level => Math.pow(0.5,level);
 export const distance = (a,b) => Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]);
@@ -40,7 +41,7 @@ function station(s,p,key){assert(onShip(p)&&distance(p.pos,STATIONS[key])<4,'Wal
 function captain(s,p){assert(s.captain===p.id,'Only the captain can commit this action.');}
 export function makeShip(hull=0){
  const widths=[2,3,4],depths=[4,6,8];
- return {hull:100,maxHull:100,fuel:100,maxFuel:100,
+ return {hull:100,maxHull:100,fuel:100,maxFuel:100,hatchOpen:false,
  upgrades:{weapon:0,armor:0,grapple:0,tank:0,hull},
  containers:[0,1].map(i=>({id:'bay'+i,name:i?'STARBOARD':'PORT',dims:[widths[hull],4,depths[hull]],shield:0})),
  extensionAvailable:true};
@@ -206,12 +207,32 @@ function releaseTractor(s,p){if(!p.tractor)return;const c=s.cargo.find(c=>c.id==
  else c.velocity=[-Math.sin(p.yaw)*.22,0,-Math.cos(p.yaw)*.22];
 }p.tractor=null;}
 const boxDims=c=>{const a=wrapAngle(c.angle||0),x=c.dims[0],z=c.dims[2];return [Math.abs(Math.cos(a))*x+Math.abs(Math.sin(a))*z,c.dims[1],Math.abs(Math.sin(a))*x+Math.abs(Math.cos(a))*z];};
+// Aft opening is a real portal: a crate must physically clear the frame.
+// Side airlock stays available for small salvage and crew EVA.
 function cargoMoveValid(s,c,from,pos){
  if(!pos.every(finite)||pos[1]<0||pos[1]+c.dims[1]>18||Math.abs(pos[0])>65||pos[2]<-65||pos[2]>30)return false;
- const d=boxDims(c),hx=d[0]/2,hz=d[2]/2,inside=p=>p[0]>-4.4&&p[0]<4.4&&p[2]>-10.4&&p[2]<10.4;
- const airlock=p=>p[0]>3.4&&p[0]<6.5&&p[2]>5.5&&p[2]<9.4&&d[0]<=2.2&&d[2]<=3.8;
- if(inside(from)!==inside(pos)&&!airlock(from)&&!airlock(pos))return false;
- if(inside(pos)&&(pos[0]-hx< -4.35||pos[0]+hx>4.35||pos[2]-hz< -10.35||pos[2]+hz>10.35||pos[1]+d[1]>3.3))return false;
+ const d=boxDims(c),hx=d[0]/2,hz=d[2]/2;
+ const inside=p=>p[0]>-4.4&&p[0]<4.4&&p[2]>-10.4&&p[2]<REAR_HATCH.z;
+ const side=p=>p[0]>3.2&&p[0]<6.6&&p[2]>5.5&&p[2]<9.4&&d[0]<=2.2&&d[2]<=3.8&&p[1]+d[1]<=3.3;
+ const rear=s.ship.hatchOpen&&
+  Math.abs(pos[0])+hx<=REAR_HATCH.width/2 &&
+  Math.abs(from[0])+hx<=REAR_HATCH.width/2 &&
+  pos[1]+d[1]<=REAR_HATCH.height&&from[1]+d[1]<=REAR_HATCH.height &&
+  Math.min(from[2],pos[2])>7.9;
+ const fromInside=inside(from),toInside=inside(pos);
+ if(fromInside!==toInside&&!rear&&!side(from)&&!side(pos))return false;
+ // A crate spanning the rear hull intersects the actual closed hatch.
+ const aftSweep=Math.min(from[2]-hz,pos[2]-hz)<REAR_HATCH.z&&Math.max(from[2]+hz,pos[2]+hz)>REAR_HATCH.z;
+ if(aftSweep&&!rear&&Math.abs(pos[0])<5&&Math.abs(from[0])<5)return false;
+ // No cargo may phase through the sealed bow or the remaining ship walls.
+ if(toInside){
+  if(pos[2]-hz< -10.35)return false;
+  if(pos[0]-hx< -4.35||pos[0]+hx>4.35){
+   if(!side(from)&&!side(pos))return false;
+  }
+  if(pos[2]+hz>REAR_HATCH.z&&!rear)return false;
+  if(pos[1]+d[1]>3.3&&!rear)return false;
+ }
  for(const o of s.cargo){
   if(o.id===c.id||!['loose','secured','tractored'].includes(o.state))continue;
   let op=o.pos,od=boxDims(o);
@@ -260,7 +281,8 @@ export function act(s,id,a){
   spend(s,l.cost);l.accepted=true;log(s,p.name+' accepted '+l.name+(l.legal?' (authorized).':' (UNAUTHORIZED).'));break;
  }
  case 'travel':{
-  station(s,p,'nav');captain(s,p);assert(!s.transit&&!s.encounter,'Finish the current encounter first.');
+  station(s,p,'nav');captain(s,p);
+  assert(!s.ship.hatchOpen,'Close the rear cargo hatch before travel.');assert(!s.transit&&!s.encounter,'Finish the current encounter first.');
   assert(!s.quota.due,'Quota due: sell and settle, or use your extension.');
   assert(Object.values(s.players).filter(p=>p.connected).every(onShip),'All connected crew must be aboard.');
   assert(!s.cargo.some(c=>['held','tractored'].includes(c.state)),'Secure or drop carried cargo before departure.');
@@ -280,6 +302,23 @@ export function act(s,id,a){
   if(w)w.grapple=false;
   if(!['A','B'].includes(from)&&w?.taken)beginEncounter(s);
   log(s,'Departing for '+(['A','B'].includes(target)?'Market '+target:'salvage coordinates')+'. '+count+' quota day used.');break;
+ }
+ case 'cargoHatch':{
+  assert(s.phase!=='transit','The cargo hatch cannot be operated during transit.');
+  const nearInterior=onShip(p)&&(distance(p.pos,STATIONS.hatch)<4||distance(p.pos,STATIONS.cargo)<4);
+  const nearExterior=distance(p.pos,[0,0,12.3])<4;
+  assert(nearInterior||nearExterior,'Operate the hatch from the aft switch or cargo console.');
+  if(s.ship.hatchOpen){
+   const blocked=s.cargo.some(c=>{
+    if(!['loose','tractored','held'].includes(c.state))return false;
+    const d=boxDims(c);
+    return c.pos[2]-d[2]/2<REAR_HATCH.z+.1&&c.pos[2]+d[2]/2>REAR_HATCH.z-.1&&Math.abs(c.pos[0])<REAR_HATCH.width/2+d[0]/2;
+   });
+   assert(!blocked,'A crate is obstructing the rear cargo hatch.');
+   assert(!Object.values(s.players).some(q=>q.connected&&Math.abs(q.pos[2]-REAR_HATCH.z)<.55&&Math.abs(q.pos[0])<REAR_HATCH.width/2),'A crew member is standing in the hatch.');
+  }
+  s.ship.hatchOpen=!s.ship.hatchOpen;
+  log(s,p.name+(s.ship.hatchOpen?' opened':' closed')+' the aft cargo hatch.');break;
  }
  case 'grapple':{
   station(s,p,'scanner');const w=requireActive(s);assert(!w.crunched,'Nothing remains to grapple.');
@@ -451,9 +490,13 @@ export function act(s,id,a){
 }
 function canMove(s,p,next){
  if(s.phase!=='salvage')return next[0]>-4&&next[0]<4&&next[2]>-9.5&&next[2]<9.5&&next[1]>=0&&next[1]<3;
- // Ship walls, except the starboard rear airlock (z=6..9).
  const was=onShip(p),inside=onShip({pos:next});
- if(was!==inside){if(!(next[0]>3.5&&next[2]>6&&next[2]<9&&next[1]<3))return false;}
+ if(was!==inside){
+  const side=next[0]>3.5&&next[2]>6&&next[2]<9&&next[1]<3;
+  const rear=s.ship.hatchOpen&&Math.abs(next[0])<REAR_HATCH.width/2-.2&&Math.abs(p.pos[0])<REAR_HATCH.width/2-.2 &&
+    next[1]<REAR_HATCH.height&&p.pos[1]<REAR_HATCH.height&&Math.min(p.pos[2],next[2])>9.5;
+  if(!side&&!rear)return false;
+ }
  return Math.abs(next[0])<60&&next[2]>-65&&next[2]<30&&next[1]>=0&&next[1]<20;
 }
 export function tick(s,dt){
