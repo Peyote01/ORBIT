@@ -48,7 +48,7 @@ const htmlCache=new Map();
 function setHTML(id,html){if(htmlCache.get(id)!==html){$(id).innerHTML=html;htmlCache.set(id,html);}}
 function render(){
  const p=me();if(!p)return;
- setHTML('hud','<strong>ORBIT / '+esc(state.code)+'</strong><span>CREW <b>'+state.players.filter(p=>p.connected).length+'/4</b></span><span>₡ <b>'+state.credits+'</b></span><span>FUEL '+state.ship.fuel+'/'+state.ship.maxFuel+'</span><span>HULL '+state.ship.hull+'/'+state.ship.maxHull+'</span><span>AFT HATCH <b>'+(state.ship.hatchOpen?'OPEN':'CLOSED')+'</b></span><span>DAY <b>'+state.quota.days+'/'+state.quota.limit+'</b> · QUOTA ₡'+state.quota.amount+(state.quota.due?' · PAYMENT DUE — MARKET REQUIRED':'')+'</span>');
+ setHTML('hud','<strong>ORBIT / '+esc(state.code)+'</strong><span>CREW <b>'+state.players.filter(p=>p.connected).length+'/4</b></span><span>₡ <b>'+state.credits+'</b></span><span>FUEL '+state.ship.fuel+'/'+state.ship.maxFuel+'</span><span>HULL '+state.ship.hull+'/'+state.ship.maxHull+'</span><span>AFT HATCH <b>'+(state.ship.hatchOpen?'OPEN':'CLOSED')+'</b></span><span>DAY <b>'+state.quota.days+'/'+state.quota.limit+'</b> · QUOTA ₡'+state.quota.amount+(state.quota.due?' · PAYMENT DUE — MARKET REQUIRED':'')+'</span>'+(state.encounter?'<span class="threat-indicator">'+(state.encounter.type==='police'?'POLICE · PORT':'RAIDERS · STARBOARD')+' · '+state.encounter.stage.toUpperCase()+' · HP '+state.encounter.hp+'</span>':''));
  setHTML('crew',state.players.map(p=>esc(p.name)+(p.id===state.captain?' ★':'')+' · '+(p.connected?p.hp+' HP':'offline')).join('<br>')+'<br><br>'+state.phase.toUpperCase()+' / '+esc(state.location)+(state.encounter?'<br>'+state.encounter.type.toUpperCase()+' · '+state.encounter.stage+'<br>'+Math.max(0,Math.ceil((state.encounter.until||state.time)-state.time))+' sec · HP '+state.encounter.hp:''));
  setHTML('logs',state.log.slice(0,5).map(l=>'<div>'+esc(l.text)+'</div>').join(''));
  $('shutter').hidden=!state.wreck?.crunchAt;
@@ -74,7 +74,8 @@ function renderPanel(){
  if(panel==='nav'){
   html+='<p>Close the rear cargo hatch before departure. Captain commits travel. All crew must be aboard and all cargo secured; loose crates inside block departure until tractored into a grid or discarded at CARGO. When quota is due, either market remains accessible to sell; payment is deducted automatically when credits cover it. First station departure each quota is free; subsequent station departures and leaving salvaged wrecks cost one day.</p>';
   for(const target of [{id:'A',name:'Market A · industrial premium'},{id:'B',name:'Market B · technical / restricted'},...(!state.quota.due?state.leads.filter(l=>l.accepted):[])])html+=btn('Travel: '+target.name,'travel',{id:target.id});
-  html+='<article>'+btn('Ship cannon','shipfire')+btn('Boost escape · 10 fuel','boost')+btn('Pay police fine · ₡'+(state.encounter?.fine||0),'payfine')+btn('Fight police · 30s distress clock','fight')+'</article>';
+  if(state.encounter)html+='<p>ENCOUNTER IN VIEW: '+(state.encounter.type==='police'?'POLICE PATROL OFF PORT (LEFT)':'RAIDER SHIP OFF STARBOARD (RIGHT)')+'. Look through the side hull panels to spot it. Enemy hull '+state.encounter.hp+' HP. Incoming cannon flashes indicate actual hits.</p>';
+   html+='<article>'+btn('Ship cannon','shipfire')+btn('Boost escape · 10 fuel','boost')+btn('Pay police fine · ₡'+(state.encounter?.fine||0),'payfine')+btn('Fight police · 30s distress clock','fight')+'</article>';
   if(state.quota.due)html+=btn('Use one extension · +7 days, same quota','extend');
   html+=btn('Rescue tow: lose cargo, +₡300 quota +1 day','tow');
  }
