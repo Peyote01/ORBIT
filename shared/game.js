@@ -404,9 +404,9 @@ export function act(s,id,a){
   const forward=[-Math.sin(p.yaw)*Math.cos(p.pitch),Math.sin(p.pitch),-Math.cos(p.yaw)*Math.cos(p.pitch)];
   const dot=v.reduce((sum,n,i)=>sum+n*forward[i],0),perp=Math.sqrt(Math.max(0,len*len-dot*dot));
   assert(dot>0&&perp<=Math.max(1,Math.max(...c.dims)*.6),'Aim directly at the crate.');
+  if(s.phase==='docked')assert(onShip({pos:c.pos})&&onShip(p),'Only crates aboard the ship can be retrieved while docked.');
   c.state='tractored';c.carrier=p.id;
   p.tractor={id:c.id,distance:clamp(len,2,TRACTOR_RANGE),targetDistance:clamp(len,2,TRACTOR_RANGE),angle:c.angle||0,targetAngle:c.angle||0};
-  if(s.phase==='docked')assert(onShip({pos:c.pos})&&onShip(p),'Only crates aboard the ship can be retrieved while docked.');
   if(s.phase==='salvage'&&!c.salvaged){const w=requireActive(s);c.salvaged=true;w.taken=true;}
   break;
  }
