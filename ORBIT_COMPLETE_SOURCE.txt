@@ -1,0 +1,33 @@
+ORBIT COMPLETE SOURCE — HUMAN-READABLE BUNDLE
+Source commit: be42a86ace69ac296f9b1a79d0b46c1a860f6cd0
+Branch: prototype/first-playable
+Repository: https://github.com/Peyote01/ORBIT
+Includes 21 tracked source/configuration/documentation files.
+File contents are separated below by BEGIN FILE / END FILE markers.
+Not executable as one script; see ORBIT_RESTORE_SOURCE.cjs for standalone reconstruction.
+npm dependencies are not included; npm install recreates them.
+
+MANIFEST:
+ - .dockerignore
+ - .github/workflows/check.yml
+ - .gitignore
+ - Dockerfile
+ - README.md
+ - docs/acceptance.md
+ - docs/design.md
+ - docs/development-plan.md
+ - package.json
+ - playwright.config.js
+ - public/client.js
+ - public/index.html
+ - public/motion.js
+ - public/scene.js
+ - public/style.css
+ - server/index.js
+ - shared/game.js
+ - tests/browser.spec.js
+ - tests/game.test.js
+ - tests/motion.test.js
+ - tests/server.test.js
+
+
