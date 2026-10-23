@@ -1,10 +1,10 @@
 # ORBIT
 A browser-based cooperative 3D space salvage prototype for 2–4 players. Built with Three.js and an authoritative Node/WebSocket server.
 
-**Status:** first playable source with an experimental multiplayer handheld tractor tool, not a deployed public game. Desktop keyboard and mouse. Generated primitive geometry; no purchased art.
+**Status:** playable multiplayer prototype on `main`, not yet a deployed public game. Desktop keyboard and mouse. Generated primitive geometry; no purchased art. Desktop keyboard and mouse. Generated primitive geometry; no purchased art.
 
 ## Run in VS Code
-Install Node.js 22+, clone this repository, and check out `prototype/first-playable`. Open the repository folder in VS Code, then use its terminal:
+Install Node.js 22+, clone this repository, and use the **`main` branch** as the single current playable source. Open the repository folder in Cursor or VS Code, then use its terminal:
 ```sh
 npm install
 npm start
@@ -22,13 +22,13 @@ npx playwright test
 WASD moves, click the scene to capture the mouse, Shift sprints, T equips or stows the tractor, left-click a loose crate to attach/release it (aim at its visible mesh), mouse wheel adjusts tractor distance, hold R while moving the mouse to rotate cargo, E locks an aligned crate when the cargo grid turns green, and Q/right-click releases the tractor. Hand-pickup and inventory auto-stow are disabled: all salvage uses the handheld tractor. V scans, F fires a sidearm, Space/Ctrl moves vertically during EVA, Esc releases the cursor/closes panels. Captain is marked ★.
 
 1. Walk to BOARD, press E, accept a free contract.
-2. Captain uses NAV to travel. Everyone must be aboard with no active tractor attachments.
+2. Captain uses NAV to travel. Everyone must be aboard, and all cargo inside must be secured or discarded.
 3. SCANNER: lock grapple; drag the scene to rotate; V scans one of five categories. Compare manufacturer records. Three matches are high confidence; five are certain.
 4. Exit the starboard rear airlock (right side near the back), move around the ship and approach the wreck. Aim at a loose crate and left-click to tractor it; E no longer picks up cargo.
-5. Guide it toward the starboard rear airlock with the tractor. Follow the physical doorway, position the crate inside the visible cargo bays, rotate until the placement indicator turns green, and press E to secure it. Cargo can only be secured by the tractor's green-grid preview. The placement system automatically tips crates 90 degrees if that is required to fit the bay. Cargo shape, support and overlap rules still matter; volume alone is insufficient.
+5. Guide it through the wide aft cargo hatch (or the side airlock for small crates) with the tractor. Follow the physical doorway, position the crate inside the visible cargo bays, rotate until the placement indicator turns green, and press E to secure it. Cargo can only be secured by the tractor's green-grid preview. The placement system automatically tips crates 90 degrees if that is required to fit the bay. Cargo shape, support and overlap rules still matter; volume alone is insufficient.
 6. Return all crew aboard. Captain may Crunch: remaining contents are destroyed; the wreck becomes Scrap.
 7. Navigate to Market A or B. Compare prices, sell, refuel, repair, and upgrade.
-8. At quota deadline, you may still fly to either Market A or B, sell goods, and settle your payment; additional wrecks are blocked until payment or extension. One extension per ship grants seven more days for the same payment. Insufficient funds at settlement repossess the ship and reset cash to 1,000.
+8. At quota deadline, you may still fly to either Market A or B and sell goods; payment is automatically deducted when credits are sufficient. Additional wrecks are blocked until payment or extension. One extension per ship grants seven more days for the same payment. Insufficient funds at settlement repossess the ship and reset cash to 1,000.
 
 ## Public hosting
 Deploy the **entire Node application** to a host that supports long-running Node processes and WebSockets, with HTTPS and one server instance. Start command: `npm start`; service port: `PORT` (defaults to 3000); health endpoint: `/health`. Dockerfile included.
