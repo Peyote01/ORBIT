@@ -195,6 +195,7 @@ test('dockside tractor can pick up a loose orphan crate and cargo console can di
   await page.waitForTimeout(350);
   await page.mouse.click(640,400);
   await expect.poll(()=>p.tractor?.id).toBe(c.id);
+  await expect(page.locator('#tractor-status')).toContainText('TRACTOR LOCKED');
   await page.keyboard.press('q');
   await expect.poll(()=>c.state).toBe('loose');
   p.pos=[...STATIONS.cargo];
