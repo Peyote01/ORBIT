@@ -229,3 +229,64 @@ test('selling at the quota deadline triggers automatic payment and new seven-day
   expect(errors).toEqual([]);
  }finally{await context.close();await app.close();}
 });
+
+test('police and raider ships, hostile fire, counterfire and wreck explosion render and disappear',async({page})=>{
+ await page.goto('/');
+ const checks=await page.evaluate(async()=>{
+  const {createScene}=await import('/scene.js');
+  const {createGame,addPlayer,snapshot}=await import('/shared/game.js');
+  const canvas=document.createElement('canvas');canvas.style.cssText='width:800px;height:500px';document.body.append(canvas);
+  const view=createScene(canvas),s=createGame('COMBAT');
+  addPlayer(s,'local','Crew');s.phase='transit';s.time=20;
+  const current=()=>{view.update(snapshot(s),'local');view.frame(0,0);return view.stats();};
+  const empty=current();
+  s.encounter={type:'police',stage:'warning',hp:100,startedAt:10,lastShotAt:null,lastPlayerShotAt:null};
+  const police=current();
+  s.encounter.stage='scanning';s.time=21;const scan=current();
+  s.encounter.stage='fight';s.encounter.lastShotAt=21;s.encounter.lastPlayerShotAt=21;
+  const firefight=current();
+  s.encounter=null;s.combatVfx={type:'police',kind:'destroyed',at:21};const explosion=current();
+  s.combatVfx=null;const cleared=current();
+  s.encounter={type:'raider',stage:'attack',hp:80,startedAt:22,lastShotAt:22,lastPlayerShotAt:null};s.time=22;
+  const raider=current();s.encounter=null;const resolved=current();
+  return {empty,police,scan,firefight,explosion,cleared,raider,resolved};
+ });
+ expect(checks.empty.encounterShip).toBe(false);
+ expect(checks.police.encounterShip).toBe(true);
+ expect(checks.scan.encounterShip).toBe(true);
+ expect(checks.firefight.incomingBeam).toBe(true);
+ expect(checks.firefight.outgoingBeam).toBe(true);
+ expect(checks.explosion.combatExplosion).toBe(true);
+ expect(checks.explosion.encounterShip).toBe(false);
+ expect(checks.cleared.combatExplosion).toBe(false);
+ expect(checks.raider.encounterShip).toBe(true);
+ expect(checks.raider.incomingBeam).toBe(true);
+ expect(checks.resolved.encounterShip).toBe(false);
+ expect(checks.resolved.incomingBeam).toBe(false);
+});
+test('two connected crew members see the same police or raider threat status',async({browser})=>{
+ const {startServer}=await import('../server/index.js');
+ const {once}=await import('node:events');
+ const app=startServer(0);await once(app.server,'listening');
+ const context=await browser.newContext();
+ const a=await context.newPage(),b=await context.newPage(),errors=[];
+ a.on('pageerror',e=>errors.push(e.message));b.on('pageerror',e=>errors.push(e.message));
+ try{
+  const url='http://127.0.0.1:'+app.server.address().port;
+  await a.goto(url);await a.getByRole('button',{name:'START A CREW'}).click();
+  await expect(a.locator('#room-code')).toHaveText(/^[A-F0-9]{6}$/);
+  const room=await a.locator('#room-code').innerText();
+  await b.goto(url);await b.getByLabel('Room code').fill(room);await b.getByRole('button',{name:'JOIN',exact:true}).click();
+  await expect(b.locator('#hud')).toContainText('CREW 2/4');
+  const s=app.rooms.get(room);s.encounter={type:'police',stage:'scanning',hp:100,startedAt:s.time,lastShotAt:null,lastPlayerShotAt:null};
+  await expect(a.locator('#hud')).toContainText('POLICE · PORT');
+  await expect(b.locator('#hud')).toContainText('POLICE · PORT');
+  s.encounter={type:'raider',stage:'attack',hp:68,startedAt:s.time,lastShotAt:s.time,lastPlayerShotAt:null};
+  await expect(a.locator('#hud')).toContainText('RAIDERS · STARBOARD');
+  await expect(b.locator('#hud')).toContainText('RAIDERS · STARBOARD');
+  s.encounter=null;
+  await expect(a.locator('#hud')).not.toContainText('RAIDERS · STARBOARD');
+  await expect(b.locator('#hud')).not.toContainText('RAIDERS · STARBOARD');
+  expect(errors).toEqual([]);
+ }finally{await context.close();await app.close();}
+});
