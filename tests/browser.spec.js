@@ -199,6 +199,7 @@ test('dockside tractor can pick up a loose orphan crate and cargo console can di
   await page.keyboard.press('q');
   await expect.poll(()=>c.state).toBe('loose');
   p.pos=[...STATIONS.cargo];
+  await expect(page.locator('#prompt')).toContainText('CARGO');
   await page.keyboard.press('e');
   await expect(page.locator('#panel')).toContainText('UNSECURED:');
   await page.getByRole('button',{name:'Discard loose crate'}).click();
