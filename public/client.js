@@ -46,10 +46,17 @@ function openPanel(key){if(panel==='scanner'&&key!=='scanner'){flushRotation();d
 const btn=(label,type,data={})=>'<button data-action="'+type+'" data-json="'+esc(JSON.stringify(data))+'">'+esc(label)+'</button>';
 const htmlCache=new Map();
 function setHTML(id,html){if(htmlCache.get(id)!==html){$(id).innerHTML=html;htmlCache.set(id,html);}}
+function settleHud(){
+ if(!state.quota.due)return '';
+ const rem=state.quota.settleRemaining;
+ const secs=rem==null?'—':Math.max(0,Math.ceil(rem));
+ const pause=state.encounter?' (paused during encounter)':'';
+ return ' · PAYMENT DUE · SETTLE '+secs+'s'+pause+(state.ship.extensionAvailable?' · EXT AVAILABLE':'');
+}
 function render(){
  const p=me();if(!p)return;
- setHTML('hud','<strong>ORBIT / '+esc(state.code)+'</strong><span>CREW <b>'+state.players.filter(p=>p.connected).length+'/4</b></span><span>₡ <b>'+state.credits+'</b></span><span>FUEL '+state.ship.fuel+'/'+state.ship.maxFuel+'</span><span>HULL '+state.ship.hull+'/'+state.ship.maxHull+'</span><span>AFT HATCH <b>'+(state.ship.hatchOpen?'OPEN':'CLOSED')+'</b></span><span>DAY <b>'+state.quota.days+'/'+state.quota.limit+'</b> · QUOTA ₡'+state.quota.amount+(state.quota.due?' · PAYMENT DUE — MARKET REQUIRED':'')+'</span>'+(state.encounter?'<span class="threat-indicator">'+(state.encounter.type==='police'?'POLICE · PORT':'RAIDERS · STARBOARD')+' · '+state.encounter.stage.toUpperCase()+' · HP '+state.encounter.hp+'</span>':''));
- setHTML('crew',state.players.map(p=>esc(p.name)+(p.id===state.captain?' ★':'')+' · '+(p.connected?p.hp+' HP':'offline')).join('<br>')+'<br><br>'+state.phase.toUpperCase()+' / '+esc(state.location)+(state.encounter?'<br>'+state.encounter.type.toUpperCase()+' · '+state.encounter.stage+'<br>'+Math.max(0,Math.ceil((state.encounter.until||state.time)-state.time))+' sec · HP '+state.encounter.hp:''));
+ setHTML('hud','<strong>ORBIT / '+esc(state.code)+'</strong><span>CREW <b>'+state.players.filter(p=>p.connected).length+'/4</b></span><span>₡ <b>'+state.credits+'</b></span><span>FUEL '+state.ship.fuel+'/'+state.ship.maxFuel+'</span><span>HULL '+state.ship.hull+'/'+state.ship.maxHull+'</span><span>AFT HATCH <b>'+(state.ship.hatchOpen?'OPEN':'CLOSED')+'</b></span><span>DAY <b>'+state.quota.days+'/'+state.quota.limit+'</b> · QUOTA ₡'+state.quota.amount+settleHud()+'</span>'+(state.encounter?'<span class="threat-indicator">'+(state.encounter.type==='police'?'POLICE · PORT':'RAIDERS · STARBOARD')+' · '+state.encounter.stage.toUpperCase()+(state.encounter.stage==='fine'?' · FINE ₡'+state.encounter.fine:'')+' · HP '+state.encounter.hp+'</span>':''));
+ setHTML('crew',state.players.map(p=>esc(p.name)+(p.id===state.captain?' ★':'')+' · '+(p.connected?p.hp+' HP':'offline')).join('<br>')+'<br><br>'+state.phase.toUpperCase()+' / '+esc(state.location)+(state.encounter?'<br>'+state.encounter.type.toUpperCase()+' · '+state.encounter.stage+(state.encounter.stage==='fine'?' · FINE ₡'+state.encounter.fine+' · '+(state.encounter.caught?.length||0)+' crate(s) caught':'')+'<br>'+(state.encounter.until==null?'AWAITING RESOLUTION':Math.max(0,Math.ceil((state.encounter.until||state.time)-state.time))+' sec')+' · HP '+state.encounter.hp:'')+(state.quota.due?'<br>SETTLE '+Math.max(0,Math.ceil(state.quota.settleRemaining??0))+'s'+(state.encounter?' PAUSED':''):''));
  setHTML('logs',state.log.slice(0,5).map(l=>'<div>'+esc(l.text)+'</div>').join(''));
  $('shutter').hidden=!state.wreck?.crunchAt;
  const near=nearest(),attached=p.tractor&&state.cargo.find(c=>c.id===p.tractor.id);
@@ -72,12 +79,31 @@ function renderPanel(){
  if(!panel||!state)return;const p=me(),w=state.wreck;let html='<button data-close>← BACK TO DECK</button><h2>'+panel.toUpperCase()+'</h2>';
  if(panel==='board')html+='<p>Accept contracts anywhere with C. Start with free contracts. Purchases use the shared account. Coordinates without rights produce illegal salvage.</p>'+state.leads.map(l=>'<article><strong>'+esc(l.name)+'</strong><p>'+esc(l.owner)+' · '+l.range+' fuel · '+esc(l.threat)+'</p>'+btn(l.accepted?'ACCEPTED':l.cost?'Buy · ₡'+l.cost:'Accept · FREE','accept',{id:l.id})+'</article>').join('');
  if(panel==='nav'){
-  html+='<p>Close the rear cargo hatch before departure. Captain commits travel. All crew must be aboard and all cargo secured; loose crates inside block departure until tractored into a grid or discarded at CARGO. When quota is due, either market remains accessible to sell; payment is deducted automatically when credits cover it. First station departure each quota is free; subsequent station departures and leaving salvaged wrecks cost one day.</p>';
+  html+='<p>Close the rear cargo hatch before departure. Captain commits travel. All crew must be aboard and all cargo secured; loose crates inside block departure until tractored into a grid or discarded at CARGO. When quota is due, either market remains accessible to sell; payment is deducted automatically when credits cover it. After the settlement window expires the ship is repossessed. First station departure each quota is free; subsequent station departures and leaving salvaged wrecks cost one day.</p>';
   for(const target of [{id:'A',name:'Market A · industrial premium'},{id:'B',name:'Market B · technical / restricted'},...(!state.quota.due?state.leads.filter(l=>l.accepted):[])])html+=btn('Travel: '+target.name,'travel',{id:target.id});
-  if(state.encounter)html+='<p>ENCOUNTER IN VIEW: '+(state.encounter.type==='police'?'POLICE PATROL OFF PORT (LEFT)':'RAIDER SHIP OFF STARBOARD (RIGHT)')+'. Look through the side hull panels to spot it. Enemy hull '+state.encounter.hp+' HP. Incoming cannon flashes indicate actual hits.</p>';
-   html+='<article>'+btn('Ship cannon','shipfire')+btn('Boost escape · 10 fuel','boost')+btn('Pay police fine · ₡'+(state.encounter?.fine||0),'payfine')+btn('Fight police · 30s distress clock','fight')+'</article>';
-  if(state.quota.due)html+=btn('Use one extension · +7 days, same quota','extend');
-  html+=btn('Rescue tow: lose cargo, +₡300 quota +1 day','tow');
+  if(state.encounter){
+   const e=state.encounter;
+   html+='<p>ENCOUNTER IN VIEW: '+(e.type==='police'?'POLICE PATROL OFF PORT (LEFT)':'RAIDER SHIP OFF STARBOARD (RIGHT)')+'. Look through the side hull panels to spot it. Enemy hull '+e.hp+' HP. Incoming cannon flashes indicate actual hits.</p>';
+   if(e.type==='police'&&e.stage==='fine'){
+    const caught=(e.caught||[]).map(id=>state.cargo.find(c=>c.id===id)).filter(Boolean);
+    const names=caught.map(c=>(GOODS[c.type]?.name||c.type)).join(', ')||(''+((e.caught||[]).length)+' crate(s)');
+    const canPay=state.credits>=e.fine,armed=!!state.ship.upgrades.weapon,isCaptain=p.id===state.captain;
+    html+='<article><p>ILLEGAL CARGO DETECTED. Fine ₡'+e.fine+'. Detected: '+esc(names)+'. Captain chooses one resolution.</p>';
+    html+=canPay&&isCaptain?btn('Pay fine · ₡'+e.fine,'payfine'):('<p>'+(canPay?'Only the captain can pay the fine.':'Cannot pay: need ₡'+e.fine+' (have ₡'+state.credits+').')+'</p>');
+    html+=isCaptain?btn('Surrender detected cargo · waive fine','surrender'):'<p>Only the captain can surrender cargo.</p>';
+    html+=armed&&isCaptain?btn('Fight police · 30s distress clock','fight'):('<p>'+(armed?'Only the captain can commit to a fight.':'Cannot fight: ship has no pulse cannon. Install one at Engineering, or pay/surrender.')+'</p>');
+    html+='</article>';
+   }else{
+    html+='<article>'+(e.type==='raider'||e.stage==='fight'?btn('Ship cannon','shipfire'):'')+(e.type==='raider'?btn('Boost escape · 10 fuel','boost'):'')+'</article>';
+   }
+  }
+  if(state.quota.due){
+   const rem=Math.max(0,Math.ceil(state.quota.settleRemaining??0));
+   html+='<article><p>QUOTA DUE ₡'+state.quota.amount+' · settlement window '+rem+'s'+(state.encounter?' (paused during encounter)':'')+'. '+(state.ship.extensionAvailable?'One free extension available (+7 days, same amount).':'Extension already used on this hull.')+'</p>';
+   if(state.ship.extensionAvailable)html+=btn('Use one extension · +7 days, same quota','extend');
+   html+='</article>';
+  }
+  html+=state.encounter?'<p>Rescue tow unavailable until the encounter is resolved.</p>':btn('Rescue tow: lose cargo, +₡300 quota +1 day','tow');
  }
  if(panel==='scanner'){
   if(!w)html+='<p>Travel to a wreck first.</p>';
@@ -99,7 +125,10 @@ function renderPanel(){
   html+='<p>Prices refresh with travel days. A favors industrial goods; B favors technology and accepts prohibited cargo. When quota is due, payment is automatically deducted once the crew has enough credits here. Sell your cargo first if you cannot yet afford it.</p><table><tr><th>Cargo</th><th>A</th><th>B</th></tr>'+Object.entries(GOODS).map(([k,g])=>'<tr><td>'+g.name+'</td><td>'+state.prices.A[k]+'</td><td>'+state.prices.B[k]+'</td></tr>').join('')+'</table>';
   const crates=state.cargo.filter(c=>c.state==='secured');html+=btn('Sell all accepted cargo','sell',{ids:crates.map(c=>c.id)});
   for(const c of crates)html+=btn('Sell '+GOODS[c.type].name+' · '+volume(c.dims)+'m³','sell',{id:c.id});
-  if(state.quota.due)html+='<article><p>QUOTA DUE: ₡'+state.quota.amount+' · Balance ₡'+state.credits+'. Sell cargo to cover the payment; it will be deducted automatically when affordable. If you cannot pay, extend or explicitly forfeit your ship.</p>'+btn(state.credits>=state.quota.amount?'SETTLE QUOTA':'Forfeit ship (cannot pay)','settle')+btn('Use ship extension · +7 days','extend')+'</article>';
+  if(state.quota.due){
+   const rem=Math.max(0,Math.ceil(state.quota.settleRemaining??0));
+   html+='<article><p>QUOTA DUE: ₡'+state.quota.amount+' · Balance ₡'+state.credits+' · Settlement window '+rem+'s'+(state.encounter?' (paused)':'')+'. Sell cargo to cover the payment; it is deducted automatically when affordable. If the window expires without payment or extension, the ship is repossessed. You may still extend once or explicitly forfeit.</p>'+btn(state.credits>=state.quota.amount?'SETTLE QUOTA':'Forfeit ship (cannot pay)','settle')+(state.ship.extensionAvailable?btn('Use ship extension · +7 days','extend'):'<p>No extension remaining on this hull.</p>')+'</article>';
+  }
  }
  if(panel==='engineering'){
   html+=btn('Refuel +25 · ₡4/unit at A, ₡5 at B','refuel')+btn('Repair +25 · ₡3/HP docked, ₡5 underway','repair');

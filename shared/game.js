@@ -1,5 +1,7 @@
 // Authoritative gameplay; no rendering or network dependencies.
 export const VERSION = 1;
+/** Server-authoritative settlement window after quota becomes due (seconds of sim time). */
+export const QUOTA_SETTLEMENT_GRACE = 180;
 export const MODEL_KEYS = ['thrusters','doors','paint','gear','brand'];
 export const MODELS = [
  {id:'wren',name:'Wren Courier',owner:'Private courier',color:0xd19c58,clues:['Twin nacelles','Port side hatch','Ochre stripe','Tripod feet','Kestrel Works'],estimate:'600–1,400',size:1},
@@ -59,7 +61,7 @@ function leadList(){
 }
 export function createGame(code,rng=Math.random){
  const s={code,version:VERSION,time:0,players:{},captain:null,credits:1000,ship:makeShip(),location:'A',phase:'docked',
- quota:{amount:1500,days:0,limit:7,freeDeparture:true,due:false,number:1},
+ quota:{amount:1500,days:0,limit:7,freeDeparture:true,due:false,number:1,settleRemaining:null},
  leads:leadList(),wrecks:{},cargo:[],nextId:1,activeWreck:null,transit:null,encounter:null,combatVfx:null,
  marketDay:0,demand:{},log:[],rng,emptySince:null,run:1};
  log(s,'Welcome aboard. Accept a free contract at the board. First departure is free.');
@@ -162,10 +164,21 @@ export function policeScan(s){
  return caught;
 }
 function nextQuota(s){
- s.quota={amount:Math.ceil(s.quota.amount*1.35/50)*50,days:0,limit:7,freeDeparture:true,due:false,number:s.quota.number+1};
+ s.quota={amount:Math.ceil(s.quota.amount*1.35/50)*50,days:0,limit:7,freeDeparture:true,due:false,number:s.quota.number+1,settleRemaining:null};
  s.demand={};log(s,'Quota paid. New seven-day obligation: '+s.quota.amount+' credits.');
  // Refresh depleted contract opportunities only between quotas, keeping every retained cargo ID unique.
  for(const l of s.leads){if(l.visited){l.id=l.id+'q'+s.quota.number;l.accepted=false;l.visited=false;}}
+}
+/** Mark quota due once and start the settlement grace countdown (idempotent). */
+export function markQuotaDue(s,reason){
+ if(s.quota.due){
+  if(s.quota.settleRemaining==null)s.quota.settleRemaining=QUOTA_SETTLEMENT_GRACE;
+  return false;
+ }
+ s.quota.due=true;
+ s.quota.settleRemaining=QUOTA_SETTLEMENT_GRACE;
+ log(s,reason||('QUOTA DUE: day '+s.quota.limit+'/'+s.quota.limit+'. Return to a market within '+QUOTA_SETTLEMENT_GRACE+'s; payment is automatic when funds are available.'));
+ return true;
 }
 // A quota is collected as soon as the crew is solvent at a market. A crew
 // arriving short of funds may sell its already-secured salvage before payment.
@@ -182,18 +195,37 @@ export function settleQuota(s,useExtension=false){
  assert(s.quota.due,'Payment is not due yet.');
  if(useExtension){
   assert(s.ship.extensionAvailable,'This ship already used its extension.');
-  s.ship.extensionAvailable=false;s.quota.limit+=7;s.quota.due=false;
+  s.ship.extensionAvailable=false;s.quota.limit+=7;s.quota.due=false;s.quota.settleRemaining=null;
   log(s,'Extension used. Seven additional travel days for the SAME quota.');return;
  }
  assert(['A','B'].includes(s.location),'Dock at a market to settle, or use your extension.');
  if(s.credits>=s.quota.amount){s.credits-=s.quota.amount;nextQuota(s);}
  else resetRun(s);
 }
-function resetRun(s){
+function resetRun(s,reason){
  const fresh=createGame(s.code,s.rng),players=s.players,captainId=s.captain,time=s.time,run=s.run+1;
  Object.assign(s,fresh,{players,captain:captainId,time,run});
  for(const p of Object.values(players)){p.pos=[2.8,0,5];p.hp=100;p.stamina=100;p.sprintExhausted=false;p.held=null;p.tractor=null;}
- log(s,'REPOSSESSED. Fresh starter ship; shared account reset to 1,000 credits.');
+ log(s,reason||'REPOSSESSED. Fresh starter ship; shared account reset to 1,000 credits.');
+}
+/** Clear a resolved encounter and any lingering combat flash so travel can resume. */
+function clearEncounter(s){s.encounter=null;s.combatVfx=null;}
+function confiscateCaughtCargo(s,ids){
+ const want=new Set(ids||[]);
+ let count=0;
+ for(const c of s.cargo){
+  if(!want.has(c.id)||['sold','lost','destroyed'].includes(c.state))continue;
+  if(c.carrier){
+   const carrier=s.players[c.carrier];
+   if(carrier){
+    if(carrier.tractor?.id===c.id)carrier.tractor=null;
+    if(carrier.held===c.id)carrier.held=null;
+   }
+   c.carrier=null;
+  }
+  c.state='lost';c.velocity=null;count++;
+ }
+ return count;
 }
 export function destroyShip(s){
  for(const p of Object.values(s.players))releaseTractor(s,p);
@@ -348,9 +380,7 @@ export function act(s,id,a){
   else if(w?.taken)count=1;
   s.ship.fuel-=fuel;
   s.quota.days=Math.min(s.quota.limit,s.quota.days+count);s.marketDay+=count;
-  if(!s.quota.due&&s.quota.days>=s.quota.limit){
-   s.quota.due=true;log(s,'QUOTA DUE: day '+s.quota.limit+'/'+s.quota.limit+'. Return to a market; payment is automatic when funds are available.');
-  }
+  if(s.quota.days>=s.quota.limit)markQuotaDue(s);
   s.transit={target,arrival:s.time+8,count,from};s.phase='transit';
   if(w)w.grapple=false;
   if(!['A','B'].includes(from)&&w?.taken)beginEncounter(s);
@@ -483,11 +513,26 @@ export function act(s,id,a){
  case 'extend':captain(s,p);assert(onShip(p),'Return to ship first.');settleQuota(s,true);break;
  case 'payfine':{
   captain(s,p);const e=s.encounter;assert(e?.type==='police'&&e.stage==='fine','No payable citation.');
-  spend(s,e.fine);log(s,'Fine paid: '+e.fine+'. Cited cargo released for this inspection.');s.encounter=null;break;
+  assert(!e.resolved,'Citation already resolved.');
+  spend(s,e.fine);e.resolved=true;
+  log(s,'Fine paid: '+e.fine+'. Cited cargo released for this inspection.');
+  clearEncounter(s);break;
+ }
+ case 'surrender':{
+  captain(s,p);const e=s.encounter;
+  assert(e?.type==='police'&&e.stage==='fine','No confiscation offer.');
+  assert(!e.resolved,'Citation already resolved.');
+  assert(Array.isArray(e.caught)&&e.caught.length,'No detected cargo to surrender.');
+  e.resolved=true;
+  const count=confiscateCaughtCargo(s,e.caught);
+  log(s,'Detected cargo surrendered ('+count+' crate(s)). Fine of '+e.fine+' waived; ship released.');
+  // Always clear even if crates were already gone — prevents a soft-lock after a raced resolve.
+  clearEncounter(s);break;
  }
  case 'fight':{
   station(s,p,'nav');captain(s,p);const e=s.encounter;
   assert(e?.type==='police'&&e.stage==='fine','No police confrontation.');
+  assert(!e.resolved,'Citation already resolved.');
   assert(s.ship.upgrades.weapon,'Starter ship is unarmed. Install a cannon first.');
   e.stage='fight';e.until=s.time+30;e.nextShot=s.time+4;log(s,'POLICE distress transmission in 30 seconds.');break;
  }
@@ -507,7 +552,7 @@ export function act(s,id,a){
  }
  case 'boost':{
   station(s,p,'nav');assert(s.encounter?.type==='raider','Boost escape is available during a raider attack.');
-  assert(s.ship.fuel>=10,'Need 10 fuel to boost.');s.ship.fuel-=10;s.encounter=null;log(s,'Boost escape successful.');break;
+  assert(s.ship.fuel>=10,'Need 10 fuel to boost.');s.ship.fuel-=10;clearEncounter(s);log(s,'Boost escape successful.');break;
  }
  case 'shoot':{
   assert(s.phase==='salvage','No on-foot target here.');assert(s.time-p.fireAt>=.3,'Sidearm cycling.');
@@ -522,7 +567,7 @@ export function act(s,id,a){
   s.quota.amount+=300;s.ship.fuel=Math.max(20,s.ship.fuel);
   s.quota.days=Math.min(s.quota.limit,s.quota.days+1);
   s.marketDay++;s.location='A';s.phase='docked';s.transit=null;s.activeWreck=null;
-  s.quota.due=s.quota.days>=s.quota.limit;
+  if(s.quota.days>=s.quota.limit)markQuotaDue(s);
   for(const p of Object.values(s.players)){releaseTractor(s,p);p.pos=[2.8,0,5];p.held=null;}
   log(s,'Rescue tow: cargo forfeited, +300 quota, one travel day.');break;
  }
@@ -611,14 +656,16 @@ export function tick(s,dt){
   if(e.type==='police'&&e.stage==='warning'&&s.time>=e.until){e.stage='scanning';e.until=s.time+5;log(s,'Police scan in progress.');}
   else if(e.type==='police'&&e.stage==='scanning'&&s.time>=e.until){
    e.caught=policeScan(s);e.fine=illegalValue(s,e.caught);
-   if(e.fine){e.stage='fine';e.until=null;log(s,'Illegal cargo detected. Fine: '+e.fine+'. Pay or fight.');}
-   else{s.encounter=null;log(s,'Police scan clear.');}
+   if(e.fine){e.stage='fine';e.until=null;e.resolved=false;log(s,'Illegal cargo detected. Fine: '+e.fine+'. Pay, surrender detected cargo, or fight.');}
+   else{clearEncounter(s);log(s,'Police scan clear.');}
   }else if(e.stage==='fight'&&s.time>=e.until){
    e.stage='reinforcements';e.until=s.time+8;log(s,'Distress signal sent. Police reinforcements incoming.');
   }else if(e.stage==='reinforcements'&&s.time>=e.until)destroyShip(s);
-  else if(e.type==='raider'&&s.time>=e.until){s.encounter=null;log(s,'Raider broke pursuit.');}
-  if((e.stage==='fight'||e.type==='raider')&&s.time>=e.nextShot){
-   s.ship.hull-=Math.max(6,18-s.ship.upgrades.armor*3);e.lastShotAt=s.time;e.nextShot=s.time+4;
+  else if(e.type==='raider'&&s.time>=e.until){clearEncounter(s);log(s,'Raider broke pursuit.');}
+  // Re-read encounter after possible destroyShip / clear.
+  const live=s.encounter;
+  if(live&&(live.stage==='fight'||live.type==='raider')&&s.time>=live.nextShot){
+   s.ship.hull-=Math.max(6,18-s.ship.upgrades.armor*3);live.lastShotAt=s.time;live.nextShot=s.time+4;
    if(s.ship.hull<=0)destroyShip(s);
   }
  }
@@ -627,11 +674,22 @@ export function tick(s,dt){
   const target=s.transit.target;s.transit=null;s.location=target;
   if(['A','B'].includes(target)){s.phase='docked';s.activeWreck=null;log(s,'Docked at Market '+target+'. Sell before settling any due quota.');}
   else{const lead=s.leads.find(l=>l.id===target);if(lead){spawnWreck(s,lead);lead.visited=true;s.activeWreck=target;s.phase='salvage';log(s,'Wreck reached. Use scanner console to grapple and identify.');}}
-  if(!s.quota.due&&s.quota.days>=s.quota.limit){s.quota.due=true;log(s,'QUOTA DUE. Return to a market to sell; payment will be collected automatically.');}
+  if(s.quota.days>=s.quota.limit)markQuotaDue(s,'QUOTA DUE. Return to a market to sell within '+QUOTA_SETTLEMENT_GRACE+'s; payment will be collected automatically.');
  }
- // Also resolves payment for crew rooms that were already overdue when this
- // version loaded; never charges while undocking, in transit, or at a wreck.
+ // Collect payment before grace expiry so a solvent crew is never repossessed
+ // on the same tick they become able to pay. Idempotent across ticks.
  autoSettleQuota(s);
+ // Settlement grace ticks only while no encounter is active (fair return trip /
+ // mandatory police stop). Market hops and reconnects do not reset remaining time.
+ if(s.quota.due){
+  if(s.quota.settleRemaining==null)s.quota.settleRemaining=QUOTA_SETTLEMENT_GRACE;
+  if(!s.encounter){
+   s.quota.settleRemaining-=dt;
+   if(s.quota.settleRemaining<=0){
+    resetRun(s,'SETTLEMENT WINDOW EXPIRED. REPOSSESSED. Fresh starter ship; shared account reset to 1,000 credits.');
+   }
+  }
+ }
 }
 export function snapshot(s){
  const w=s.activeWreck?s.wrecks[s.activeWreck]:null;
