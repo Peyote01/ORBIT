@@ -167,6 +167,17 @@ function nextQuota(s){
  // Refresh depleted contract opportunities only between quotas, keeping every retained cargo ID unique.
  for(const l of s.leads){if(l.visited){l.id=l.id+'q'+s.quota.number;l.accepted=false;l.visited=false;}}
 }
+// A quota is collected as soon as the crew is solvent at a market. A crew
+// arriving short of funds may sell its already-secured salvage before payment.
+// Repeated server ticks are idempotent because nextQuota clears due.
+function autoSettleQuota(s){
+ if(!s.quota.due||s.phase!=='docked'||!['A','B'].includes(s.location)||s.credits<s.quota.amount)return false;
+ const payment=s.quota.amount;
+ s.credits-=payment;
+ nextQuota(s);
+ log(s,'AUTOMATIC QUOTA PAYMENT: '+payment+' credits deducted.');
+ return true;
+}
 export function settleQuota(s,useExtension=false){
  assert(s.quota.due,'Payment is not due yet.');
  if(useExtension){
@@ -321,7 +332,9 @@ export function act(s,id,a){
   assert(!s.ship.hatchOpen,'Close the rear cargo hatch before travel.');assert(!s.transit&&!s.encounter,'Finish the current encounter first.');
   assert(!s.quota.due||['A','B'].includes(a.id),'Quota due: return to Market A or B to sell and settle, or use your extension.');
   assert(Object.values(s.players).filter(p=>p.connected).every(onShip),'All connected crew must be aboard.');
-  assert(!s.cargo.some(c=>['held','tractored'].includes(c.state)),'Secure or drop carried cargo before departure.');
+  assert(!s.cargo.some(c=>c.state==='tractored'),'Release and secure tractor cargo before departure.');
+  assert(!s.cargo.some(c=>c.state==='loose'&&onShip({pos:c.pos})),
+   'Unsecured cargo aboard: use the tractor to secure it or jettison it at the cargo console before departure.');
   const target=a.id;assert(target!==s.location,'Already at this destination.');
   let fuel=10;
   if(!['A','B'].includes(target)){
@@ -333,7 +346,11 @@ export function act(s,id,a){
   let count=0;
   if(['A','B'].includes(from)){if(s.quota.freeDeparture)s.quota.freeDeparture=false;else count=1;}
   else if(w?.taken)count=1;
-  s.ship.fuel-=fuel;s.quota.days+=count;s.marketDay+=count;
+  s.ship.fuel-=fuel;
+  s.quota.days=Math.min(s.quota.limit,s.quota.days+count);s.marketDay+=count;
+  if(!s.quota.due&&s.quota.days>=s.quota.limit){
+   s.quota.due=true;log(s,'QUOTA DUE: day '+s.quota.limit+'/'+s.quota.limit+'. Return to a market; payment is automatic when funds are available.');
+  }
   s.transit={target,arrival:s.time+8,count,from};s.phase='transit';
   if(w)w.grapple=false;
   if(!['A','B'].includes(from)&&w?.taken)beginEncounter(s);
@@ -378,7 +395,7 @@ export function act(s,id,a){
   log(s,'Crew hypothesis: '+MODELS.find(m=>m.id===a.model).name+'. Compare all five clues for certainty.');break;
  }
  case 'tractorAttach':{
-  assert(s.phase==='salvage','Tractor salvage requires a wreck.');
+  assert(s.phase==='salvage'||s.phase==='docked','Tractor cargo requires a salvage site or market dock.');
   assert(!p.held&&!p.tractor,'Release your current cargo first.');
   const c=s.cargo.find(c=>c.id===a.id&&c.state==='loose');assert(c,'Cargo is not available.');
   const center=[c.pos[0],c.pos[1]+c.dims[1]/2,c.pos[2]],origin=[p.pos[0],p.pos[1]+1.6,p.pos[2]];
@@ -387,9 +404,11 @@ export function act(s,id,a){
   const forward=[-Math.sin(p.yaw)*Math.cos(p.pitch),Math.sin(p.pitch),-Math.cos(p.yaw)*Math.cos(p.pitch)];
   const dot=v.reduce((sum,n,i)=>sum+n*forward[i],0),perp=Math.sqrt(Math.max(0,len*len-dot*dot));
   assert(dot>0&&perp<=Math.max(1,Math.max(...c.dims)*.6),'Aim directly at the crate.');
+  if(s.phase==='docked')assert(onShip({pos:c.pos})&&onShip(p),'Only crates aboard the ship can be retrieved while docked.');
   c.state='tractored';c.carrier=p.id;
   p.tractor={id:c.id,distance:clamp(len,2,TRACTOR_RANGE),targetDistance:clamp(len,2,TRACTOR_RANGE),angle:c.angle||0,targetAngle:c.angle||0};
-  const w=requireActive(s);if(!c.salvaged){c.salvaged=true;w.taken=true;}break;
+  if(s.phase==='salvage'&&!c.salvaged){const w=requireActive(s);c.salvaged=true;w.taken=true;}
+  break;
  }
  case 'tractorRelease':{assert(p.tractor,'No cargo attached.');releaseTractor(s,p);break;}
  case 'tractorSecure':{
@@ -402,9 +421,11 @@ export function act(s,id,a){
   log(s,GOODS[c.type].name+' secured in '+s.ship.containers.find(b=>b.id===slot.container).name+'.');break;
  }
  case 'jettison':{
-  station(s,p,'cargo');const c=s.cargo.find(c=>c.id===a.id&&c.state==='secured');assert(c,'Cargo not secured.');
-  assert(!s.cargo.some(o=>o!==c&&o.state==='secured'&&o.container===c.container&&o.cell[1]>=c.cell[1]+c.packedDims[1]),'Unload top crates first.');
-  c.state='lost';log(s,GOODS[c.type].name+' jettisoned.');break;
+  station(s,p,'cargo');
+  const c=s.cargo.find(c=>c.id===a.id&&(c.state==='secured'||(c.state==='loose'&&onShip({pos:c.pos}))));
+  assert(c,'Cargo is not aboard or cannot be jettisoned.');
+  if(c.state==='secured')assert(!s.cargo.some(o=>o!==c&&o.state==='secured'&&o.container===c.container&&o.cell[1]>=c.cell[1]+c.packedDims[1]),'Unload top crates first.');
+  c.state='lost';c.velocity=null;log(s,GOODS[c.type].name+' jettisoned.');break;
  }
  case 'crunch':{
   station(s,p,'scanner');captain(s,p);const w=requireActive(s);
@@ -422,7 +443,8 @@ export function act(s,id,a){
    c.state='sold';total+=price;count++;s.demand[s.location+':'+c.type]=(s.demand[s.location+':'+c.type]||0)+1;
   }
   assert(count>0,'No saleable secured cargo selected. Market A refuses prohibited goods.');
-  s.credits+=total;log(s,count+' crate(s) sold for '+total+' credits. Revenue is spendable until quota is due.');break;
+  s.credits+=total;log(s,count+' crate(s) sold for '+total+' credits.');
+  autoSettleQuota(s);break;
  }
  case 'refuel':{
   station(s,p,'engineering');assert(s.phase==='docked','Refuel at a market.');
@@ -497,7 +519,9 @@ export function act(s,id,a){
  case 'tow':{
   station(s,p,'nav');captain(s,p);assert(!s.encounter,'Resolve the encounter before calling a tow.');
   for(const c of s.cargo)if(aboardCargo(s,c))c.state='lost';
-  s.quota.amount+=300;s.ship.fuel=Math.max(20,s.ship.fuel);s.quota.days++;s.marketDay++;s.location='A';s.phase='docked';s.transit=null;s.activeWreck=null;
+  s.quota.amount+=300;s.ship.fuel=Math.max(20,s.ship.fuel);
+  s.quota.days=Math.min(s.quota.limit,s.quota.days+1);
+  s.marketDay++;s.location='A';s.phase='docked';s.transit=null;s.activeWreck=null;
   s.quota.due=s.quota.days>=s.quota.limit;
   for(const p of Object.values(s.players)){releaseTractor(s,p);p.pos=[2.8,0,5];p.held=null;}
   log(s,'Rescue tow: cargo forfeited, +300 quota, one travel day.');break;
@@ -602,8 +626,11 @@ export function tick(s,dt){
   const target=s.transit.target;s.transit=null;s.location=target;
   if(['A','B'].includes(target)){s.phase='docked';s.activeWreck=null;log(s,'Docked at Market '+target+'. Sell before settling any due quota.');}
   else{const lead=s.leads.find(l=>l.id===target);if(lead){spawnWreck(s,lead);lead.visited=true;s.activeWreck=target;s.phase='salvage';log(s,'Wreck reached. Use scanner console to grapple and identify.');}}
-  if(s.quota.days>=s.quota.limit){s.quota.due=true;log(s,'QUOTA DUE. Settle at market or spend your one ship extension.');}
+  if(!s.quota.due&&s.quota.days>=s.quota.limit){s.quota.due=true;log(s,'QUOTA DUE. Return to a market to sell; payment will be collected automatically.');}
  }
+ // Also resolves payment for crew rooms that were already overdue when this
+ // version loaded; never charges while undocking, in transit, or at a wreck.
+ autoSettleQuota(s);
 }
 export function snapshot(s){
  const w=s.activeWreck?s.wrecks[s.activeWreck]:null;

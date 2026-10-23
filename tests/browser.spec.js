@@ -177,3 +177,55 @@ test('starter 32 m3 bay shows auto-tip tractor placement and secures with E',asy
   expect(errors).toEqual([]);
  }finally{await context.close();await app.close();}
 });
+
+test('dockside tractor can pick up a loose orphan crate and cargo console can discard it',async({browser})=>{
+ const {startServer}=await import('../server/index.js');
+ const {STATIONS}=await import('../shared/game.js');
+ const {once}=await import('node:events');
+ const app=startServer(0);await once(app.server,'listening');
+ const context=await browser.newContext({viewport:{width:1280,height:800}});
+ const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+ try{
+  await page.goto('http://127.0.0.1:'+app.server.address().port);
+  await page.getByRole('button',{name:'START A CREW'}).click();
+  await expect(page.locator('#room-code')).toHaveText(/^[A-F0-9]{6}$/);
+  const code=await page.locator('#room-code').innerText(),s=app.rooms.get(code),p=s.players[s.captain];
+  const c={id:'old-orphan',type:'alloy',dims:[1,1,1],state:'loose',pos:[1,1.1,2],angle:0};
+  s.cargo.push(c);p.pos=[1,0,5];
+  await page.waitForTimeout(350);
+  await page.mouse.click(640,400);
+  await expect.poll(()=>p.tractor?.id).toBe(c.id);
+  await expect(page.locator('#tractor-status')).toContainText('TRACTOR LOCKED');
+  await page.keyboard.press('q');
+  await expect.poll(()=>c.state).toBe('loose');
+  p.pos=[...STATIONS.cargo];
+  await expect(page.locator('#prompt')).toContainText('CARGO');
+  await page.keyboard.press('e');
+  await expect(page.locator('#panel')).toContainText('UNSECURED:');
+  await page.getByRole('button',{name:'Discard loose crate'}).click();
+  await expect.poll(()=>c.state).toBe('lost');
+  expect(errors).toEqual([]);
+ }finally{await context.close();await app.close();}
+});
+test('selling at the quota deadline triggers automatic payment and new seven-day cycle',async({browser})=>{
+ const {startServer}=await import('../server/index.js');
+ const {STATIONS}=await import('../shared/game.js');
+ const {once}=await import('node:events');
+ const app=startServer(0);await once(app.server,'listening');
+ const context=await browser.newContext(),page=await context.newPage(),errors=[];
+ page.on('pageerror',e=>errors.push(e.message));
+ try{
+  await page.goto('http://127.0.0.1:'+app.server.address().port);
+  await page.getByRole('button',{name:'START A CREW'}).click();
+  await expect(page.locator('#room-code')).toHaveText(/^[A-F0-9]{6}$/);
+  const code=await page.locator('#room-code').innerText(),s=app.rooms.get(code),p=s.players[s.captain];
+  s.quota.days=7;s.quota.due=true;s.credits=1450;p.pos=[...STATIONS.market];
+  s.cargo.push({id:'payday',type:'alloy',dims:[1,1,1],state:'secured',container:'bay1',cell:[0,0,0],packedDims:[1,1,1]});
+  await expect(page.locator('#hud')).toContainText('DAY 7/7');
+  await page.keyboard.press('e');
+  await page.getByRole('button',{name:'Sell all accepted cargo'}).click();
+  await expect.poll(()=>s.quota.number).toBe(2);
+  await expect(page.locator('#hud')).toContainText('DAY 0/7');
+  expect(errors).toEqual([]);
+ }finally{await context.close();await app.close();}
+});
