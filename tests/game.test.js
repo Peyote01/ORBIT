@@ -364,3 +364,50 @@ test('overdue crew can change markets without clock exceeding limit, tow also cl
  at(s,'nav');act(s,'p',{type:'tow'});
  assert.equal(s.quota.days,7);assert.equal(s.quota.due,true);
 });
+
+test('police encounter broadcasts its visible ship and scan stage to every crew member',()=>{
+ const s=createGame('POLICE',()=>.2);addPlayer(s,'p','Captain');addPlayer(s,'q','Crew');
+ at(s,'board');act(s,'p',{type:'accept',id:'free-a'});
+ at(s,'nav');act(s,'p',{type:'travel',id:'free-a'});advance(s,9);
+ s.wrecks['free-a'].taken=true;s.players.q.pos=[2,0,5];
+ at(s,'nav');act(s,'p',{type:'travel',id:'A'});
+ assert.equal(s.encounter?.type,'police');
+ assert.equal(s.encounter?.stage,'warning');
+ assert.equal(s.encounter?.startedAt,s.time);
+ assert.equal(snapshot(s).encounter?.type,'police');
+ advance(s,21);assert.equal(s.encounter?.stage,'scanning');
+ assert.equal(snapshot(s).encounter?.stage,'scanning');
+ advance(s,6);
+ assert.equal(s.encounter,null,'Clear police inspection removes the visual ship');
+ assert.equal(snapshot(s).encounter,null);
+});
+test('raider fire timestamps match actual hull damage and player cannon shots',()=>{
+ const s=game();s.phase='transit';s.ship.upgrades.weapon=1;s.ship.hull=100;
+ s.encounter={type:'raider',stage:'attack',hp:80,until:s.time+25,nextShot:s.time+1,startedAt:s.time,lastShotAt:null,lastPlayerShotAt:null};
+ const prior=s.ship.hull;advance(s,1.1);
+ assert.ok(s.ship.hull<prior);
+ assert.ok(Number.isFinite(snapshot(s).encounter?.lastShotAt));
+ const hp=s.encounter.hp;
+ at(s,'nav');act(s,'p',{type:'shipfire'});
+ assert.equal(s.encounter.hp,hp-12);
+ assert.equal(snapshot(s).encounter.lastPlayerShotAt,s.time);
+ // Eliminating an encounter leaves a short shared destruction flash.
+ s.encounter.hp=12;
+ advance(s,1);
+ at(s,'nav');act(s,'p',{type:'shipfire'});
+ assert.equal(s.encounter,null);
+ assert.equal(snapshot(s).combatVfx?.kind,'destroyed');
+ assert.equal(snapshot(s).combatVfx?.type,'raider');
+ advance(s,1.6);
+ assert.equal(snapshot(s).combatVfx,null,'Expired explosions are removed from game state');
+});
+test('police and raider ship visual events are removed on paid citation, escape and ship destruction',()=>{
+ const s=game();s.encounter={type:'police',stage:'fine',fine:100,hp:100};
+ s.credits=1000;act(s,'p',{type:'payfine'});assert.equal(snapshot(s).encounter,null);
+ s.encounter={type:'raider',stage:'attack',hp:80,until:s.time+20};
+ at(s,'nav');act(s,'p',{type:'boost'});
+ assert.equal(snapshot(s).encounter,null);assert.equal(s.ship.fuel,90);
+ s.encounter={type:'raider',stage:'attack',hp:80,fine:0};
+ s.combatVfx={type:'raider',kind:'destroyed',at:s.time};
+ destroyShip(s);assert.equal(snapshot(s).encounter,null);assert.equal(snapshot(s).combatVfx,null);
+});
