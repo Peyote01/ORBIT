@@ -60,7 +60,7 @@ function leadList(){
 export function createGame(code,rng=Math.random){
  const s={code,version:VERSION,time:0,players:{},captain:null,credits:1000,ship:makeShip(),location:'A',phase:'docked',
  quota:{amount:1500,days:0,limit:7,freeDeparture:true,due:false,number:1},
- leads:leadList(),wrecks:{},cargo:[],nextId:1,activeWreck:null,transit:null,encounter:null,
+ leads:leadList(),wrecks:{},cargo:[],nextId:1,activeWreck:null,transit:null,encounter:null,combatVfx:null,
  marketDay:0,demand:{},log:[],rng,emptySince:null,run:1};
  log(s,'Welcome aboard. Accept a free contract at the board. First departure is free.');
  return s;
@@ -200,15 +200,15 @@ export function destroyShip(s){
  const fine=s.encounter?.fine||0;s.credits=Math.max(0,s.credits-fine);
  s.ship=makeShip();for(const c of s.cargo)if(aboardCargo(s,c))c.state='lost';
  s.cargo=s.cargo.filter(c=>!['lost','sold','destroyed'].includes(c.state));
- s.location='A';s.phase='docked';s.transit=null;s.encounter=null;s.activeWreck=null;
+ s.location='A';s.phase='docked';s.transit=null;s.encounter=null;s.combatVfx=null;s.activeWreck=null;
  for(const p of Object.values(s.players)){p.pos=[2.8,0,5];p.hp=100;p.stamina=100;p.sprintExhausted=false;p.held=null;p.tractor=null;}
  log(s,'Ship destroyed. Starter restored; credits retained minus '+fine+' in outstanding fines. Quota clock is unchanged.');
 }
 function beginEncounter(s){
  const r=s.rng();
  if(s.quota.days<1||r>0.55)return;
- if(r<0.3){s.encounter={type:'police',stage:'warning',until:s.time+20,hp:100,fine:0,caught:[],nextShot:0};log(s,'POLICE: scan begins in 20 seconds, then runs for 5 seconds.');}
- else{s.encounter={type:'raider',stage:'attack',until:s.time+25,hp:80,fine:0,nextShot:s.time+5};log(s,'RAIDER INTERCEPT. Fire from navigation console, repair, or boost away.');}
+ if(r<0.3){s.encounter={type:'police',stage:'warning',until:s.time+20,hp:100,fine:0,caught:[],nextShot:0,startedAt:s.time,lastShotAt:null,lastPlayerShotAt:null};log(s,'POLICE: scan begins in 20 seconds, then runs for 5 seconds.');}
+ else{s.encounter={type:'raider',stage:'attack',until:s.time+25,hp:80,fine:0,nextShot:s.time+5,startedAt:s.time,lastShotAt:null,lastPlayerShotAt:null};log(s,'RAIDER INTERCEPT. Fire from navigation console, repair, or boost away.');}
 }
 // Tractor cargo has server-owned bottom-center world coordinates.
 const TRACTOR_RANGE=14, TRACTOR_SPEED=18;
@@ -495,9 +495,9 @@ export function act(s,id,a){
   station(s,p,'nav');assert(s.ship.upgrades.weapon,'Ship has no weapon installed.');
   assert(s.time-(s.lastShipFire??-5)>=.8,'Cannon recharging.');s.lastShipFire=s.time;
   const e=s.encounter;
-  if(e){assert(e.stage==='fight'||e.type==='raider','Choose fight before firing.');e.hp-=12;
+  if(e){assert(e.stage==='fight'||e.type==='raider','Choose fight before firing.');e.hp-=12;e.lastPlayerShotAt=s.time;
    if(e.hp<=0){
-    const police=e.type==='police';s.encounter=null;s.transit=null;s.phase='salvage';
+    const police=e.type==='police';s.combatVfx={type:e.type,at:s.time,kind:'destroyed'};s.encounter=null;s.transit=null;s.phase='salvage';
     const id='defeated-'+s.nextId++,lead={id,model:police?2:1,owner:police?'Space Police':'Raiders',legal:false,threat:'Clear',goods:['alloy','electronics','illicit']};
     spawnWreck(s,lead);s.activeWreck=id;s.location=id;log(s,'Hostile vessel disabled. Its salvage is UNAUTHORIZED.');}
   }else{
@@ -618,10 +618,11 @@ export function tick(s,dt){
   }else if(e.stage==='reinforcements'&&s.time>=e.until)destroyShip(s);
   else if(e.type==='raider'&&s.time>=e.until){s.encounter=null;log(s,'Raider broke pursuit.');}
   if((e.stage==='fight'||e.type==='raider')&&s.time>=e.nextShot){
-   s.ship.hull-=Math.max(6,18-s.ship.upgrades.armor*3);e.nextShot=s.time+4;
+   s.ship.hull-=Math.max(6,18-s.ship.upgrades.armor*3);e.lastShotAt=s.time;e.nextShot=s.time+4;
    if(s.ship.hull<=0)destroyShip(s);
   }
  }
+ if(s.combatVfx&&s.time-s.combatVfx.at>1.5)s.combatVfx=null;
  if(s.transit&&!s.encounter&&s.time>=s.transit.arrival){
   const target=s.transit.target;s.transit=null;s.location=target;
   if(['A','B'].includes(target)){s.phase='docked';s.activeWreck=null;log(s,'Docked at Market '+target+'. Sell before settling any due quota.');}
@@ -639,6 +640,6 @@ export function snapshot(s){
  return {version:VERSION,code:s.code,time:s.time,run:s.run,captain:s.captain,credits:s.credits,ship:s.ship,location:s.location,phase:s.phase,
  quota:s.quota,leads:s.leads.map(({goods,model,...l})=>l),players:Object.values(s.players).map(({input,...p})=>p),
  cargo,wreck:w?{...w,model:undefined,visual:{color:MODELS[w.model].color,thrusters:w.model===1?4:2},owner:Object.keys(w.clues).length>=3?w.owner:'Unidentified'}:null,
- transit:s.transit,encounter:s.encounter,marketDay:s.marketDay,log:s.log,
+ transit:s.transit,encounter:s.encounter,combatVfx:s.combatVfx,marketDay:s.marketDay,log:s.log,
  prices:Object.fromEntries(['A','B'].map(m=>[m,Object.fromEntries(Object.keys(GOODS).map(k=>[k,marketPrice(s,k,m)]))]))};
 }

@@ -20,3 +20,9 @@ Record browser/device, steps, expected outcome and actual outcome for each failu
 - At a market dock, retarget that loose crate with the tractor and secure it, or discard it using the CARGO console. Verify it disappears from the deck and departures work again. A loose crate outside the ship must not block travel.
 - With day 6/7 and enough cash to cover quota, leave a wreck carrying only secured cargo for a market. The HUD must never read 8/7; on docking the payment is deducted exactly once and the new quota begins at day 0/7.
 - With day 7/7 and insufficient cash, dock and sell cargo. If the sale raises cash above the quota, payment must be deducted automatically, without clicking SETTLE. If still insolvent, allow selling and transfers between markets while keeping day capped at 7/7.
+
+## Encounter ship visuals
+- Depart a salvaged wreck and trigger police inspection; verify the white/blue patrol ship is visible off the **port** hull during warning, scanning and fine phases. The scanning cone and warning strobes must be apparent.
+- Trigger a raider attack; verify its distinct orange/rust industrial craft is visible off **starboard**. When raiders damage the ship, a red/orange hostile cannon beam appears; when the player uses the ship cannon, a blue return beam appears.
+- Disable the attacking ship and verify a brief destruction burst and no persistent combat model. Paying a police fine, escaping a raider, and losing the ship must also clear the hostile model.
+- Test with two separate devices in the same room; both HUDs and ships should show the same police/raider encounter. Test in Chrome with GPU acceleration enabled.

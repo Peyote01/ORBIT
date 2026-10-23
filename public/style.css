@@ -7,3 +7,6 @@
 #tractor-status{color:#84def6;letter-spacing:.05em;min-width:165px}#tractor-status.active{color:#6ff3ad}
 #placement{position:absolute;bottom:138px;left:50%;transform:translateX(-50%);color:#8dddef;background:#0b1824cc;padding:7px 13px;font:700 12px monospace;letter-spacing:.07em;pointer-events:none}#placement:empty{display:none}#placement.valid{color:#70f5a6;border:1px solid #30865d}#placement.invalid{color:#ff8d8d;border:1px solid #a34e4e}
 @media(max-width:700px){#placement{bottom:175px;max-width:90%;text-align:center}#tractor-status{min-width:0}}
+
+/* Encounter vessels are real 3D targets; this readout points crew toward their side of the ship. */
+#hud .threat-indicator{color:#ffae81;border:1px solid #a95f4d;background:#482c2888;padding:3px 7px;font-weight:700;letter-spacing:.05em}
