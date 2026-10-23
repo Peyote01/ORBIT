@@ -296,3 +296,71 @@ test('quota due permits returning to either market to sell, but blocks new wreck
  assert.equal(s.location,'B','Crew can switch markets while payment is due');
  assert.equal(s.quota.due,true);
 });
+
+test('loose cargo inside the ship blocks departure until secured, but dockside tractor can recover old stranded crates',()=>{
+ const s=game(),p=s.players.p;
+ at(s,'board');act(s,'p',{type:'accept',id:'free-a'});
+ const c={id:'orphan',type:'machinery',dims:[2,1,2],state:'loose',carrier:null,container:null,pos:[1,0,2],angle:0};
+ s.cargo.push(c);
+ at(s,'nav');
+ assert.throws(()=>act(s,'p',{type:'travel',id:'free-a'}),/Unsecured cargo aboard/);
+ assert.equal(s.phase,'docked');assert.equal(s.ship.fuel,100,'Failed travel must not consume fuel');
+ p.pos=[1,0,5];p.pitch=-.35;
+ act(s,'p',{type:'tractorAttach',id:c.id});
+ assert.equal(c.state,'tractored');assert.equal(c.carrier,'p');
+ assert.equal(tractorSlot(s,c)?.valid,true);
+ act(s,'p',{type:'tractorSecure'});
+ assert.equal(c.state,'secured');assert.equal(p.tractor,null);
+ at(s,'nav');act(s,'p',{type:'travel',id:'free-a'});
+ assert.equal(s.phase,'transit');
+});
+test('crew can discard a stranded loose crate from the cargo console without carrying it',()=>{
+ const s=game(),p=s.players.p;
+ const c={id:'stranded',type:'alloy',dims:[1,1,1],state:'loose',pos:[1,0,4],angle:0};
+ s.cargo.push(c);at(s,'cargo');act(s,'p',{type:'jettison',id:c.id});
+ assert.equal(c.state,'lost');assert.ok(!snapshot(s).cargo.some(x=>x.id===c.id));
+ assert.throws(()=>act(s,'p',{type:'tractorAttach',id:c.id}),/not available/);
+});
+test('dropping a tractor crate aboard prevents launch until recovered, exterior loose salvage does not',()=>{
+ const s=game(),p=s.players.p;at(s,'board');act(s,'p',{type:'accept',id:'free-a'});
+ at(s,'nav');act(s,'p',{type:'travel',id:'free-a'});advance(s,9);
+ const c=s.cargo[0];c.pos=[1,0,2];p.pos=[1,0,5];p.pitch=-.35;
+ act(s,'p',{type:'tractorAttach',id:c.id});act(s,'p',{type:'tractorRelease'});
+ assert.equal(c.state,'loose');at(s,'nav');
+ assert.throws(()=>act(s,'p',{type:'travel',id:'A'}),/Unsecured cargo aboard/);
+ c.pos=[0,0,-30];assert.doesNotThrow(()=>act(s,'p',{type:'travel',id:'A'}));
+});
+test('day 7 quota is charged automatically when solvent crew reaches market without day 8',()=>{
+ const s=game();at(s,'board');act(s,'p',{type:'accept',id:'free-a'});
+ at(s,'nav');act(s,'p',{type:'travel',id:'free-a'});advance(s,9);
+ s.quota.days=6;s.credits=2400;s.wrecks['free-a'].taken=true;
+ at(s,'nav');act(s,'p',{type:'travel',id:'A'});
+ assert.equal(s.quota.days,7);assert.equal(s.quota.due,true);
+ advance(s,9);
+ assert.equal(s.location,'A');assert.equal(s.quota.number,2);
+ assert.equal(s.quota.days,0);assert.equal(s.quota.due,false);
+ assert.equal(s.credits,900,'Exactly one 1500 credit payment is deducted');
+ advance(s,2);assert.equal(s.credits,900,'Server ticks must not charge twice');
+ assert.ok(s.log.some(x=>x.text.includes('AUTOMATIC QUOTA PAYMENT')));
+});
+test('market sale covers an underfunded due quota automatically, allowing sale before repossession',()=>{
+ const s=game(),p=s.players.p;
+ s.quota.days=7;s.quota.due=true;s.credits=1450;s.location='A';s.phase='docked';
+ const c={id:'final-sale',type:'alloy',dims:[1,1,1],state:'secured',container:'bay1',cell:[0,0,0],packedDims:[1,1,1]};
+ s.cargo.push(c);
+ tick(s,.05);assert.equal(s.quota.number,1,'Do not repossess a crew that still needs to sell cargo');
+ at(s,'market');act(s,'p',{type:'sell',ids:[c.id]});
+ assert.equal(c.state,'sold');assert.equal(s.quota.number,2);
+ assert.equal(s.quota.due,false);
+ assert.ok(s.credits>=0&&s.credits<300,'Payment must be deducted from the shared balance');
+});
+test('overdue crew can change markets without clock exceeding limit, tow also clamps clock',()=>{
+ const s=game();s.quota.days=7;s.quota.due=true;s.credits=1000;
+ at(s,'nav');act(s,'p',{type:'travel',id:'B'});advance(s,9);
+ assert.equal(s.quota.days,7);assert.equal(s.quota.due,true);
+ assert.equal(s.location,'B');
+ at(s,'nav');act(s,'p',{type:'travel',id:'A'});advance(s,9);
+ assert.equal(s.quota.days,7);assert.equal(s.quota.due,true);
+ at(s,'nav');act(s,'p',{type:'tow'});
+ assert.equal(s.quota.days,7);assert.equal(s.quota.due,true);
+});
