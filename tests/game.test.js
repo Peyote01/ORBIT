@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createGame,addPlayer,leavePlayer,act,tick,STATIONS,settleQuota,holdDimensions,policeScan,detectionChance,fits,destroyShip,setInput,scrapCrates,volume,cargoValue,cargoPrice,marketPrice,tractorSlot,cargoMoveValid,REAR_HATCH,onShip,snapshot,makeShip,rearHatchHeight} from '../shared/game.js';
+import {createGame,addPlayer,leavePlayer,act,tick,STATIONS,settleQuota,holdDimensions,policeScan,detectionChance,fits,destroyShip,setInput,scrapCrates,volume,cargoValue,cargoPrice,marketPrice,tractorSlot,cargoMoveValid,REAR_HATCH,onShip,snapshot,makeShip,rearHatchHeight,QUOTA_SETTLEMENT_GRACE,markQuotaDue} from '../shared/game.js';
 function game(){const s=createGame('TEST',()=>.99);addPlayer(s,'p','Captain');return s;}
 function at(s,key){s.players.p.pos=[...STATIONS[key]];}
 function advance(s,n){for(let i=0;i<n*20;i++)tick(s,.05);}
@@ -402,7 +402,7 @@ test('raider fire timestamps match actual hull damage and player cannon shots',(
  assert.equal(snapshot(s).combatVfx,null,'Expired explosions are removed from game state');
 });
 test('police and raider ship visual events are removed on paid citation, escape and ship destruction',()=>{
- const s=game();s.encounter={type:'police',stage:'fine',fine:100,hp:100};
+ const s=game();s.encounter={type:'police',stage:'fine',fine:100,hp:100,caught:[]};
  s.credits=1000;act(s,'p',{type:'payfine'});assert.equal(snapshot(s).encounter,null);
  s.encounter={type:'raider',stage:'attack',hp:80,until:s.time+20};
  at(s,'nav');act(s,'p',{type:'boost'});
@@ -410,4 +410,196 @@ test('police and raider ship visual events are removed on paid citation, escape 
  s.encounter={type:'raider',stage:'attack',hp:80,fine:0};
  s.combatVfx={type:'raider',kind:'destroyed',at:s.time};
  destroyShip(s);assert.equal(snapshot(s).encounter,null);assert.equal(snapshot(s).combatVfx,null);
+});
+
+function illicitCargo(s,id,opts={}){
+ const c={id,type:'illicit',dims:[1,1,1],illegal:true,state:opts.state||'secured',container:opts.container||'bay1',
+  cell:opts.cell||[0,0,0],packedDims:[1,1,1],pos:opts.pos||[0,0,0],carrier:opts.carrier||null,angle:0,salvaged:true,source:'test'};
+ s.cargo.push(c);return c;
+}
+
+test('insolvent unarmed crew resolves a police fine by surrendering detected cargo',()=>{
+ const s=game();s.credits=50;s.ship.upgrades.weapon=0;s.phase='transit';
+ const caught=illicitCargo(s,'caught1'),safe=illicitCargo(s,'safe1',{container:'bay0',cell:[0,0,0]});
+ const legal={id:'legal1',type:'alloy',dims:[1,1,1],illegal:false,state:'secured',container:'bay1',cell:[1,0,0],packedDims:[1,1,1],pos:[0,0,0],salvaged:true,source:'test'};
+ s.cargo.push(legal);
+ s.encounter={type:'police',stage:'fine',fine:900,caught:['caught1'],hp:100,until:null,resolved:false};
+ assert.throws(()=>act(s,'p',{type:'payfine'}),/Insufficient/);
+ at(s,'nav');
+ assert.throws(()=>act(s,'p',{type:'fight'}),/unarmed/);
+ assert.throws(()=>act(s,'p',{type:'tow'}),/encounter/);
+ assert.throws(()=>act(s,'p',{type:'travel',id:'A'}),/encounter/);
+ act(s,'p',{type:'surrender'});
+ assert.equal(s.encounter,null);
+ assert.equal(caught.state,'lost');
+ assert.equal(safe.state,'secured','Undetected illegal cargo must remain');
+ assert.equal(legal.state,'secured');
+ assert.equal(s.credits,50,'Surrender waives the fine');
+ assert.equal(snapshot(s).encounter,null);
+ assert.throws(()=>act(s,'p',{type:'surrender'}),/confiscation/);
+ assert.throws(()=>act(s,'p',{type:'payfine'}),/citation/);
+});
+
+test('solvent crew pays a police fine once and clears the encounter',()=>{
+ const s=game();s.credits=2000;s.phase='transit';
+ illicitCargo(s,'c1');
+ s.encounter={type:'police',stage:'fine',fine:900,caught:['c1'],hp:100,resolved:false};
+ act(s,'p',{type:'payfine'});
+ assert.equal(s.credits,1100);
+ assert.equal(s.cargo.find(c=>c.id==='c1').state,'secured','Paying keeps cargo');
+ assert.equal(s.encounter,null);
+ assert.throws(()=>act(s,'p',{type:'payfine'}),/citation/);
+});
+
+test('armed crew can fight police; win clears encounter without duplicate salvage',()=>{
+ const s=game();s.ship.upgrades.weapon=1;s.phase='transit';s.location='enroute';
+ s.encounter={type:'police',stage:'fine',fine:500,caught:['x'],hp:100,until:null,resolved:false,nextShot:0};
+ at(s,'nav');act(s,'p',{type:'fight'});
+ assert.equal(s.encounter.stage,'fight');
+ assert.throws(()=>act(s,'p',{type:'payfine'}),/citation/);
+ assert.throws(()=>act(s,'p',{type:'surrender'}),/confiscation/);
+ // Police start at 100 HP; each accepted shot deals 12. Advance past cannon recharge between shots.
+ for(let i=0;i<9&&s.encounter;i++){act(s,'p',{type:'shipfire'});advance(s,1);}
+ assert.equal(s.encounter,null);
+ assert.equal(s.phase,'salvage');
+ assert.ok(s.activeWreck?.startsWith('defeated-'));
+ const wreckId=s.activeWreck;
+ assert.throws(()=>act(s,'p',{type:'fight'}),/confrontation/);
+ assert.equal(Object.keys(s.wrecks).filter(id=>id.startsWith('defeated-')).length,1);
+ assert.equal(s.activeWreck,wreckId);
+});
+
+test('surrender confiscates only server-detected cargo ids, exactly once',()=>{
+ const s=game();
+ const a=illicitCargo(s,'a'),b=illicitCargo(s,'b',{container:'bay0'}),c=illicitCargo(s,'c',{cell:[1,0,0]});
+ s.encounter={type:'police',stage:'fine',fine:1800,caught:['a','b'],hp:100,resolved:false};
+ act(s,'p',{type:'surrender'});
+ assert.equal(a.state,'lost');assert.equal(b.state,'lost');assert.equal(c.state,'secured');
+ assert.equal(s.encounter,null);
+ // A stale/duplicate surrender attempt after resolution must fail closed (no encounter).
+ assert.throws(()=>act(s,'p',{type:'surrender'}),/confiscation/);
+ // If a new citation somehow lists already-gone ids, surrender still clears instead of soft-locking.
+ s.encounter={type:'police',stage:'fine',fine:900,caught:['a','b'],hp:100,resolved:false};
+ act(s,'p',{type:'surrender'});
+ assert.equal(s.encounter,null);
+ assert.equal(c.state,'secured','Undetected cargo remains untouched across resolutions');
+});
+
+test('police encounters clear after pay, surrender, fight-loss, and clear scan',()=>{
+ const pay=game();pay.credits=5000;pay.encounter={type:'police',stage:'fine',fine:100,caught:['z'],hp:100};
+ act(pay,'p',{type:'payfine'});assert.equal(pay.encounter,null);
+ const sur=game();illicitCargo(sur,'z');sur.encounter={type:'police',stage:'fine',fine:900,caught:['z'],hp:100};
+ act(sur,'p',{type:'surrender'});assert.equal(sur.encounter,null);
+ const loss=game();loss.ship.upgrades.weapon=1;loss.credits=500;
+ loss.encounter={type:'police',stage:'reinforcements',until:loss.time,nextShot:loss.time+99,hp:100,fine:200,startedAt:loss.time};
+ tick(loss,.05);assert.equal(loss.encounter,null);assert.equal(loss.location,'A');assert.equal(loss.credits,300);
+ const clear=createGame('CLR',()=>.2);addPlayer(clear,'p','C');
+ // Force a finished clear scan with no illegal cargo.
+ clear.encounter={type:'police',stage:'scanning',until:clear.time,hp:100,caught:[],fine:0};
+ tick(clear,.05);assert.equal(clear.encounter,null);
+});
+
+test('quota auto-pays when solvent at market and sale can fund overdue payment',()=>{
+ const solvent=game();solvent.quota.due=true;solvent.quota.days=7;solvent.quota.settleRemaining=60;solvent.credits=2000;
+ solvent.location='A';solvent.phase='docked';tick(solvent,.05);
+ assert.equal(solvent.quota.number,2);assert.equal(solvent.quota.due,false);assert.equal(solvent.quota.settleRemaining,null);
+ const sale=game();sale.quota.due=true;sale.quota.days=7;sale.quota.settleRemaining=90;sale.credits=1450;
+ sale.location='A';sale.phase='docked';
+ const c={id:'fund',type:'alloy',dims:[1,1,1],state:'secured',container:'bay1',cell:[0,0,0],packedDims:[1,1,1]};
+ sale.cargo.push(c);at(sale,'market');act(sale,'p',{type:'sell',ids:[c.id]});
+ assert.equal(sale.quota.number,2);assert.equal(sale.quota.due,false);
+});
+
+test('insolvent overdue quota repossesses after grace; market hops do not reset the window',()=>{
+ const s=game();s.quota.days=7;markQuotaDue(s);s.credits=100;s.location='A';s.phase='docked';
+ assert.equal(s.quota.settleRemaining,QUOTA_SETTLEMENT_GRACE);
+ const start=s.quota.settleRemaining;
+ at(s,'nav');act(s,'p',{type:'travel',id:'B'});advance(s,9);
+ assert.equal(s.location,'B');assert.equal(s.quota.due,true);
+ assert.ok(s.quota.settleRemaining<start,'Grace continues during market travel');
+ assert.ok(s.quota.settleRemaining>QUOTA_SETTLEMENT_GRACE-30,'Market hop must not restart the full grace');
+ const mid=s.quota.settleRemaining;
+ at(s,'nav');act(s,'p',{type:'travel',id:'A'});advance(s,9);
+ assert.ok(s.quota.settleRemaining<mid);
+ s.quota.settleRemaining=0.01;s.credits=100;const run=s.run;
+ tick(s,.05);
+ assert.equal(s.run,run+1);assert.equal(s.credits,1000);assert.equal(s.quota.due,false);
+ assert.equal(s.ship.extensionAvailable,true);assert.equal(s.location,'A');
+ assert.equal(s.encounter,null);assert.equal(s.transit,null);
+});
+
+test('extension clears settlement countdown and defers the same quota amount',()=>{
+ const s=game();s.quota.days=7;markQuotaDue(s);s.credits=100;
+ assert.equal(s.quota.settleRemaining,QUOTA_SETTLEMENT_GRACE);
+ settleQuota(s,true);
+ assert.equal(s.quota.due,false);assert.equal(s.quota.settleRemaining,null);
+ assert.equal(s.quota.amount,1500);assert.equal(s.quota.limit,14);
+ assert.equal(s.ship.extensionAvailable,false);
+ s.quota.days=14;markQuotaDue(s);
+ assert.equal(s.quota.due,true);assert.equal(s.quota.settleRemaining,QUOTA_SETTLEMENT_GRACE);
+ assert.throws(()=>settleQuota(s,true),/already used/);
+});
+
+test('police encounter pauses quota grace; combined fine+quota paths stay consistent',()=>{
+ const s=game();s.quota.days=7;markQuotaDue(s);s.credits=200;s.phase='transit';
+ const rem=s.quota.settleRemaining;
+ illicitCargo(s,'caught');
+ s.encounter={type:'police',stage:'fine',fine:900,caught:['caught'],hp:100,resolved:false};
+ advance(s,5);
+ assert.equal(s.quota.settleRemaining,rem,'Grace pauses while police fine is open');
+ act(s,'p',{type:'surrender'});
+ assert.equal(s.encounter,null);assert.equal(s.credits,200);
+ assert.equal(s.quota.due,true);
+ advance(s,1);
+ assert.ok(s.quota.settleRemaining<rem);
+ // Paying a fine that leaves crew insolvent for quota keeps grace running.
+ const pay=game();pay.quota.days=7;markQuotaDue(pay);pay.credits=1600;pay.phase='transit';
+ illicitCargo(pay,'x');
+ pay.encounter={type:'police',stage:'fine',fine:900,caught:['x'],hp:100};
+ act(pay,'p',{type:'payfine'});
+ assert.equal(pay.credits,700);assert.equal(pay.quota.due,true);
+ assert.ok(pay.quota.settleRemaining!=null);
+ // Destroy ship while quota due retains quota clock; grace resumes after the encounter clears.
+ const boom=game();boom.quota.days=7;markQuotaDue(boom);boom.credits=800;
+ const left=boom.quota.settleRemaining;
+ boom.encounter={type:'police',stage:'reinforcements',until:boom.time,fine:100,hp:10};
+ tick(boom,.05);
+ assert.equal(boom.encounter,null);assert.equal(boom.quota.due,true);
+ assert.ok(boom.quota.settleRemaining<=left&&boom.quota.settleRemaining>left-0.2);
+ assert.equal(boom.credits,700);
+});
+
+test('duplicate delayed police and quota actions cannot repeat payments or resets',()=>{
+ const s=game();s.credits=5000;illicitCargo(s,'d');
+ s.encounter={type:'police',stage:'fine',fine:100,caught:['d'],hp:100};
+ act(s,'p',{type:'payfine'});
+ assert.throws(()=>act(s,'p',{type:'payfine'}));
+ assert.throws(()=>act(s,'p',{type:'surrender'}));
+ const q=game();q.quota.due=true;q.quota.days=7;q.quota.settleRemaining=.02;q.credits=10;q.location='A';q.phase='docked';
+ const run=q.run;tick(q,.05);assert.equal(q.run,run+1);
+ tick(q,.05);assert.equal(q.run,run+1,'Repossession happens once');
+ assert.equal(q.credits,1000);
+});
+
+test('multiplayer snapshots share police surrender and quota repossession outcomes',()=>{
+ const s=createGame('MP',()=>.99);addPlayer(s,'p','Captain');addPlayer(s,'q','Crew');
+ s.credits=0;illicitCargo(s,'m1');illicitCargo(s,'m2',{container:'bay0'});
+ s.encounter={type:'police',stage:'fine',fine:1800,caught:['m1'],hp:100};
+ act(s,'p',{type:'surrender'});
+ const snap=snapshot(s);
+ assert.equal(snap.encounter,null);
+ assert.ok(!snap.cargo.some(c=>c.id==='m1'));
+ assert.ok(snap.cargo.some(c=>c.id==='m2'));
+ markQuotaDue(s);s.credits=0;s.quota.settleRemaining=0;s.location='A';s.phase='docked';
+ tick(s,.05);
+ const after=snapshot(s);
+ assert.equal(after.run,2);assert.equal(after.credits,1000);assert.equal(after.quota.due,false);
+ assert.equal(after.players.length,2);
+});
+
+test('reconnect-style state keeps settlement remaining across snapshot',()=>{
+ const s=game();markQuotaDue(s);s.quota.settleRemaining=123.4;
+ const snap=snapshot(s);
+ assert.equal(snap.quota.due,true);
+ assert.equal(snap.quota.settleRemaining,123.4);
 });

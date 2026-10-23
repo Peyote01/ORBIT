@@ -9,11 +9,11 @@ A chaotic 15–25 minute cooperative salvage run: the crew argues over clues, ca
 - Manipulate all salvage with handheld tractor beams (no hand-carry/auto-stow system), then secure crates on a cubic-meter grid. Check dimensions, overlap, support and height. Largest permitted crate is 4×4×8m (128m³). A 2×2×1 crate occupies 4m³.
 - Captain's Crunch destroys all contents left inside and converts the wreck into Scrap, with shutters hiding conversion.
 - Two markets change prices with in-game days. Fuel, repairs, weapons, armor, grapple, cargo shielding and bigger ships compete with quota cash.
-- Departure after salvage may trigger raiders or police. Police give 20 seconds warning, scan for five seconds, then offer a fine or confrontation. Fighting gives 30 seconds before distress transmission and reinforcements.
+- Departure after salvage may trigger raiders or police. Police give 20 seconds warning, scan for five seconds, then offer pay / surrender detected cargo / fight. Fighting gives 30 seconds before distress transmission and reinforcements. Surrender confiscates only server-detected crates, waives the fine, and clears the encounter (available without credits or weapons).
 - NPC destruction restores a starter ship and removes upgrades, retaining credits less outstanding fine. Quota repossession instead fully restarts at 1,000 credits.
 - Quota lasts seven travel days. First station departure in each quota is free. Subsequent station departures and departures from wrecks where salvage was taken count a day. Unfinished wrecks cannot be farmed for free departures after taking cargo.
-- Quota is checked on arrival. At a market, players sell before settlement. If the quota becomes due while at a wreck, the crew can still return to Market A or B to sell cargo; new wreck travel is restricted until settlement or extension. Rescue tow remains an emergency option. This arrival/settlement policy is a prototype decision requiring playtest approval.
-- One extension per ship adds seven days to the SAME quota. Prototype exposes this when payment is due. Buying a new ship grants its own extension.
+- Quota is checked on arrival. At a market, players sell before settlement. If the quota becomes due while at a wreck, the crew can still return to Market A or B to sell cargo; new wreck travel is restricted until settlement or extension. A **180-second settlement grace** begins when the quota first becomes due, persists across market hops and reconnects, and pauses while an encounter is active. Auto-pay when solvent; expiry without payment/extension repossesses once. Rescue tow remains an emergency option.
+- One extension per ship adds seven days to the SAME quota and clears the current settlement countdown. Prototype exposes this when payment is due. Buying a new ship grants its own extension.
 - Shielding is per bay and protects only contents stored there. Detection odds are 0.5^level, rolled per bay per inspection. Initial conversion halves volume; further upgrades never shrink it further.
 
 ## Prototype tunings, not final design
@@ -26,7 +26,7 @@ Initial quota 1,500; later quotas grow 35%, rounded to 50. Starting two holds to
 - Rival destruction spawns extra illegal crates; it does not yet create a separate fully explorable rival wreck.
 - Multi-million contracts are visible as progression placeholders; current cargo prices do not balance their cost. Do not buy these in a normal prototype run.
 - No persistence, accounts, voice chat, mobile touch controls or production moderation. Escape/death and rescue-tow economics need balancing.
-- Deadline enforcement gates new salvage travel but permits return to either market for selling, and requires an explicit settlement choice. Add a defined automatic payment/failure trigger after market unloading, so crews cannot indefinitely defer settlement.
+- Deadline enforcement gates new salvage travel but permits return to either market for selling. Automatic payment when solvent and automatic repossession after the settlement grace expire so crews cannot indefinitely defer settlement.
 These limitations are tracked honestly rather than represented as finished features.
 
 ## Dependencies and priority
