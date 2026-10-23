@@ -63,6 +63,57 @@ export function createScene(canvas){
  stars.setAttribute('position',new T.Float32BufferAttribute(v,3));scene.add(new T.Points(stars,new T.PointsMaterial({color:0xb5d0ef,size:.25})));
  const planet=new T.Mesh(new T.SphereGeometry(24,32,20),material(0x234455));planet.position.set(-65,-25,-95);scene.add(planet);
 
+// Encounter craft are entirely procedural, visible through the ship's translucent
+ // hull sides. They are decorative only; damage and combat authority stay on server.
+ const combatPosition=(type,elapsed)=>{
+  const police=type==='police',side=police?-1:1;
+  return [side*(16+Math.sin(elapsed*.53)*2.1),5.2+Math.sin(elapsed*.8)*1.3,-3.5+Math.cos(elapsed*.34)*5.8];
+ };
+ function buildHostileCraft(root,type){
+  const police=type==='police';
+  const hull=police?0xaac9da:0x6a4440,trim=police?0x32688a:0xb36543;
+  // Sloped prow, wing pods, engines, hardpoints and navigational lights.
+  box(root,[0,0,0],[4.0,1.55,9.4],hull);
+  const prow=new T.Mesh(new T.ConeGeometry(2.05,4.5,4),material(hull));prow.rotation.x=-Math.PI/2;prow.rotation.y=Math.PI/4;prow.position.set(0,.12,-6.55);root.add(prow);
+  box(root,[0,.9,-.5],[2.5,.8,3.6],police?0x244966:0x3a3035);
+  for(const side of [-1,1]){
+   box(root,[side*3.7,-.2,1],[4.5,.45,4.4],hull);
+   box(root,[side*5.3,.1,-.7],[.75,1.0,5],trim);
+   box(root,[side*1.35,-.3,4.7],[1.3,1.25,1.4],police?0x335d76:0x25272e);
+   const exhaust=new T.Mesh(new T.CircleGeometry(.48,12),new T.MeshBasicMaterial({color:police?0x80caff:0xff9152,side:T.DoubleSide}));
+   exhaust.position.set(side*1.35,-.3,5.43);root.add(exhaust);
+   box(root,[side*3.2,.45,-1.9],[.35,.7,1.8],police?0x7bb6d6:0x31272a);
+  }
+  box(root,[0,1.42,1.6],[1.35,.8,1.7],police?0xd9e9f2:0x5a5554);
+  if(police){
+   box(root,[-.55,1.92,.45],[.8,.26,.5],0xe64f59);
+   box(root,[.55,1.92,.45],[.8,.26,.5],0x4dafff);
+   label(root,'PATROL / POLICE',[0,3.9,0],'#9adaff',6);
+   const red=new T.PointLight(0xff4d56,3,12),blue=new T.PointLight(0x4d9dff,3,12);
+   red.position.set(-.55,2.1,.4);blue.position.set(.55,2.1,.4);root.add(red,blue);
+   root.userData.sirens=[red,blue];
+   const scan=new T.Mesh(new T.ConeGeometry(6.2,13,20,1,true),new T.MeshBasicMaterial({color:0x59b8ff,transparent:true,opacity:.1,side:T.DoubleSide,depthWrite:false}));
+   scan.rotation.z=-Math.PI/2;scan.position.set(7.5,0,0);root.add(scan);root.userData.scan=scan;
+  }else{
+   box(root,[0,1.5,-2],[3,.4,2.2],0xdd7743);
+   for(const side of [-1,1])box(root,[side*4.7,.75,2.8],[.3,1.6,2.2],0x942d2f);
+   label(root,'RAIDER / HOSTILE',[0,3.9,0],'#ffb584',6);
+   const engine=new T.PointLight(0xff8740,3,15);engine.position.set(0,0,5.8);root.add(engine);
+   root.userData.engines=[engine];
+  }
+ }
+ function makeCombatBeam(root,color){
+  const core=new T.Mesh(new T.CylinderGeometry(.07,.11,1,7),new T.MeshBasicMaterial({color,transparent:true,opacity:.95,depthWrite:false}));
+  const aura=new T.Mesh(new T.CylinderGeometry(.19,.25,1,7),new T.MeshBasicMaterial({color,transparent:true,opacity:.24,depthWrite:false}));
+  root.add(core,aura);root.userData.parts=[core,aura];
+  const flash=new T.Mesh(new T.SphereGeometry(.45,8,6),new T.MeshBasicMaterial({color,transparent:true,opacity:.85}));
+  root.add(flash);root.userData.flash=flash;
+ }
+ function alignCombatBeam(root,start,end){
+  const a=new T.Vector3(...start),b=new T.Vector3(...end),v=b.clone().sub(a),len=v.length();
+  for(const part of root.userData.parts){part.position.copy(a).addScaledVector(v,.5);part.quaternion.setFromUnitVectors(new T.Vector3(0,1,0),v.clone().normalize());part.scale.set(1,len,1);}
+  root.userData.flash.position.copy(b);
+ }
  const dynamic=new T.Group();scene.add(dynamic);
  const aimRay=new T.Raycaster();
  const upAxis=new T.Vector3(0,1,0);
@@ -97,6 +148,35 @@ export function createScene(canvas){
    g.rotation.y=w.yaw;
    keep('wreck-label',w.owner,root=>label(root,w.owner,[0,0,0],'#e6b963',5),[0,4,-32]);
    if(w.rivalHP>0)keep('rival','rival',root=>{box(root,[0,0,0],[6,3,9],0x75545b);label(root,'RIVAL VESSEL',[0,3,0],'#ef7d7d',4);},[15,2,-35]);
+  }
+  // Server timestamps control weapon flashes so all crew see the same shots.
+  if(s.encounter){
+   const e=s.encounter;
+   const craft=keep('encounter-ship',e.type,root=>buildHostileCraft(root,e.type),combatPosition(e.type,Math.max(0,s.time-(e.startedAt??s.time))));
+   const elapsed=Math.max(0,s.time-(e.startedAt??s.time));
+   craft.rotation.y=e.type==='police'?-Math.PI*.44:Math.PI*.44;
+   craft.userData.scan&&(craft.userData.scan.visible=e.stage==='scanning');
+   if(e.lastShotAt!=null&&s.time-e.lastShotAt<.38){
+    const beam=keep('encounter-incoming-beam','incoming-'+e.type,root=>makeCombatBeam(root,e.type==='police'?0xff6171:0xffa358));
+    alignCombatBeam(beam,[...craft.position],[e.type==='police'?-3.8:3.8,1.8,2.1]);
+   }
+   if(e.lastPlayerShotAt!=null&&s.time-e.lastPlayerShotAt<.26){
+    const beam=keep('encounter-outgoing-beam','friendly',root=>makeCombatBeam(root,0x69eaff));
+    alignCombatBeam(beam,[0,3,-8],[...craft.position]);
+   }
+  }
+  if(s.combatVfx?.kind==='destroyed'&&s.time-s.combatVfx.at<1.5){
+   const blast=keep('encounter-explosion',s.combatVfx.type,root=>{
+    const particles=new T.Group();root.add(particles);
+    for(let i=0;i<15;i++){
+     const theta=i*2.4,up=((i*11)%9-4)/4;
+     const m=new T.Mesh(new T.OctahedronGeometry(.22+(i%4)*.08),new T.MeshBasicMaterial({color:i%3?0xffbd69:0xd85b47}));
+     m.position.set(Math.sin(theta)*3.4,up*2.5,Math.cos(theta)*3.5);particles.add(m);
+    }
+    const flash=new T.Mesh(new T.IcosahedronGeometry(3.2,1),new T.MeshBasicMaterial({color:0xffa34c,transparent:true,opacity:.55,depthWrite:false}));
+    root.add(flash);root.userData.flash=flash;root.userData.particles=particles;
+   },combatPosition(s.combatVfx.type,0));
+   blast.userData.flash.scale.setScalar(.65+Math.min(1.4,s.time-s.combatVfx.at));
   }
   for(const c of s.cargo){
    let pos=c.pos,dims=c.dims;
@@ -162,6 +242,17 @@ export function createScene(canvas){
    assembly.scale.y=scale;
   }
   loadingApron.visible=hatchProgress>.05;
+  if(last?.encounter){
+   const e=last.encounter,elapsed=Math.max(0,last.time+(now-receivedAt)/1000-(e.startedAt??last.time));
+   const craft=entries.get('encounter-ship')?.root;
+   if(craft){
+    craft.position.set(...combatPosition(e.type,elapsed));
+    if(craft.userData.sirens){const which=Math.floor(elapsed*5)%2;craft.userData.sirens.forEach((light,i)=>light.intensity=i===which?5:.1);}
+    if(craft.userData.scan?.visible)craft.userData.scan.material.opacity=.08+Math.sin(elapsed*3)*.035;
+    const inBeam=entries.get('encounter-incoming-beam')?.root;if(inBeam)alignCombatBeam(inBeam,[...craft.position],[e.type==='police'?-3.8:3.8,1.8,2.1]);
+    const outBeam=entries.get('encounter-outgoing-beam')?.root;if(outBeam)alignCombatBeam(outBeam,[0,3,-8],[...craft.position]);
+   }
+  }
   const ratio=Math.min(devicePixelRatio,1.5);
   if(width!==innerWidth||height!==innerHeight||pixelRatio!==ratio){
    width=innerWidth;height=innerHeight;pixelRatio=ratio;
@@ -187,5 +278,5 @@ export function createScene(canvas){
   }
   return null;
  }
- return {update,frame,targetCargo,setScannerYaw:value=>scannerYaw=value,setMode:m=>mode=m,stats:()=>({created,disposed,objects:entries.size,geometries:renderer.info.memory.geometries,textures:renderer.info.memory.textures})};
+ return {update,frame,targetCargo,setScannerYaw:value=>scannerYaw=value,setMode:m=>mode=m,stats:()=>({created,disposed,objects:entries.size,encounterShip:entries.has('encounter-ship'),incomingBeam:entries.has('encounter-incoming-beam'),outgoingBeam:entries.has('encounter-outgoing-beam'),combatExplosion:entries.has('encounter-explosion'),geometries:renderer.info.memory.geometries,textures:renderer.info.memory.textures})};
 }
