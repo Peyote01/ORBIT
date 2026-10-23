@@ -207,3 +207,332 @@ Record browser/device, steps, expected outcome and actual outcome for each failu
 ================================================================================
 END FILE: docs/acceptance.md
 ================================================================================
+
+================================================================================
+BEGIN FILE: docs/design.md
+================================================================================
+# ORBIT — prototype design
+## Goal
+A chaotic 15–25 minute cooperative salvage run: the crew argues over clues, cargo space, fuel and deadlines while sharing one vulnerable ship and bank account. No realistic orbital mechanics.
+
+## Established rules
+- 2–4 people join a room code, walk around a shared ship and share 1,000 starting credits.
+- Contract board offers free and paid salvage rights, including expensive contracts visible from the start. Multiple accepted jobs remain available. Coordinate-only leads and destroyed NPC ships have unauthorized salvage.
+- Grapple and rotate derelicts; scan thrusters, doors, paint, landing gear and brand. Compare in-game manufacturer records: at least three matching components support identification, all five give certainty. Models suggest cargo and value, not guaranteed manifests.
+- Manipulate all salvage with handheld tractor beams (no hand-carry/auto-stow system), then secure crates on a cubic-meter grid. Check dimensions, overlap, support and height. Largest permitted crate is 4×4×8m (128m³). A 2×2×1 crate occupies 4m³.
+- Captain's Crunch destroys all contents left inside and converts the wreck into Scrap, with shutters hiding conversion.
+- Two markets change prices with in-game days. Fuel, repairs, weapons, armor, grapple, cargo shielding and bigger ships compete with quota cash.
+- Departure after salvage may trigger raiders or police. Police give 20 seconds warning, scan for five seconds, then offer a fine or confrontation. Fighting gives 30 seconds before distress transmission and reinforcements.
+- NPC destruction restores a starter ship and removes upgrades, retaining credits less outstanding fine. Quota repossession instead fully restarts at 1,000 credits.
+- Quota lasts seven travel days. First station departure in each quota is free. Subsequent station departures and departures from wrecks where salvage was taken count a day. Unfinished wrecks cannot be farmed for free departures after taking cargo.
+- Quota is checked on arrival. At a market, players sell before settlement. If the quota becomes due while at a wreck, the crew can still return to Market A or B to sell cargo; new wreck travel is restricted until settlement or extension. Rescue tow remains an emergency option. This arrival/settlement policy is a prototype decision requiring playtest approval.
+- One extension per ship adds seven days to the SAME quota. Prototype exposes this when payment is due. Buying a new ship grants its own extension.
+- Shielding is per bay and protects only contents stored there. Detection odds are 0.5^level, rolled per bay per inspection. Initial conversion halves volume; further upgrades never shrink it further.
+
+## Prototype tunings, not final design
+Initial quota 1,500; later quotas grow 35%, rounded to 50. Starting two holds total 64m³. Ship range costs 10–35 fuel. Free personal wrecks lead into small corporate and bank wrecks. Three model archetypes, eight cargo types, one enemy per hazardous wreck. Crew respawn at medbay and drop carried cargo. Sidearms are supplied; starter ship has no cannon. Shield cap six, ship-size cap two. Installed upgrades transfer on bigger-hull purchase.
+
+## Known approximations to improve
+- Exterior geometry currently varies mainly in paint and thrusters. All five clue categories work through scanning and the catalog, but doors, landing gear and branding need distinct visible meshes/decals before claiming the complete visual identification mechanic.
+- Rotation is constrained while crew are outside. Wrecks use open decks and simplified collision; avatars can intersect cargo. Tractor cargo-grid packing is authoritative and may auto-tip a crate 90 degrees into a compatible bay; crates are not rigid-body simulations.
+- Larger holds expand logically within the same prototype deck; ship art/interior must be resized for full-size crates. Biggest 128m³ crate is a capacity stress case.
+- Rival destruction spawns extra illegal crates; it does not yet create a separate fully explorable rival wreck.
+- Multi-million contracts are visible as progression placeholders; current cargo prices do not balance their cost. Do not buy these in a normal prototype run.
+- No persistence, accounts, voice chat, mobile touch controls or production moderation. Escape/death and rescue-tow economics need balancing.
+- Deadline enforcement gates new salvage travel but permits return to either market for selling, and requires an explicit settlement choice. Add a defined automatic payment/failure trigger after market unloading, so crews cannot indefinitely defer settlement.
+These limitations are tracked honestly rather than represented as finished features.
+
+## Dependencies and priority
+Shared game state → room membership/input authority → ship locomotion → contracts/travel → grapple/scan → salvage/cargo grid → markets/fuel → quota/reset → inspections/combat → upgrades → hosted two-device acceptance.
+Build every economic operation on server state. Render snapshots in the browser. Keep prices, rights, deadlines and collisions testable without WebGL.
+
+## Playtest revisions — October 21
+- C and the HUD Contracts button open the contract list anywhere, including EVA and transit; purchases still use the shared account and server validation.
+- Room code remains visible with Copy code for invitations. Other devices need a reachable host address; localhost is only the local machine.
+- Hold Shift to sprint at twice normal speed (also twice carrying speed), with 100 stamina, 25/second drain, and 20/second recovery. Exhaustion requires recovery to 25 before sprinting resumes.
+- Identification is never a salvage gate. Crates may be recovered without scans, a model guess, or a grapple. Identification is planning information; model-specific doors/high-value part locations remain future work.
+- Grapple remains necessary for rotating/scanning and Crunch. Hold-drag uses cursor capture; V scans during dragging. Rotation packets are limited to 20/second with immediate local preview and server acknowledgment.
+- Crunch outputs largest-first Scrap crates from sizes 128, 64, 32, 16, 8, 4, 2, 1 m³. Maximum dimensions are 4×4×8m. No volume is discarded or invented. Prototype wreck yields are 16/40/160m³ by model. Output does not shrink to fit the current ship. Scrap sale value scales with volume.
+================================================================================
+END FILE: docs/design.md
+================================================================================
+
+
+================================================================================
+BEGIN FILE: docs/development-plan.md
+================================================================================
+# Development plan to October 30, 2026
+## Architecture
+Three.js ES modules render primitive assets. One Node.js process serves static files and a WebSocket room server. Simulation runs at 20Hz, snapshots at 10Hz. Server validates movement bounds, proximity, captain authority, money, cargo geometry and encounter timing. Action IDs suppress repeated purchases within a bounded reconnect session cache. No database in this prototype.
+
+Why this stack: a compact browser build and one deployable service reduce setup dependencies before the deadline. Unity/UE5 remain possible later, but changing engines now would require redoing networking, builds and browser delivery.
+
+## Milestones
+- October 20–22: repository, rule tests, connection tests, first 3D client; run from VS Code and repair critical defects.
+- October 23–24: complete two remote-player salvage → market → quota run. Fix collision, recovery, crew separation and confusing controls.
+- October 25: deploy single-instance HTTPS/WebSocket server; verify external room join and reconnect. Hosting account choice/setup remains required.
+- October 26–27: improve five visible identification components, cargo bay geometry, onboarding and quota deadline enforcement. Tune free contracts to sustain early progression.
+- October 28: four-person session, weak-connection and reset tests; verify police timers and shielding.
+- October 29: freeze new features; fix blockers, verify clean-browser access and submission URL.
+- October 30: final remote smoke test and submit before the stated competition deadline. Recheck the program's official timezone and submission requirements.
+
+## Release gates
+Two independent physical devices on different networks can create/join the same room. New players complete a run from written in-game instructions. No duplicated money/items. Quota success, extension and repossession are demonstrated. Public URL remains reachable while creator's computer is off. Deploy restart behavior is disclosed.
+
+## Asset workflow
+Start with the procedural meshes included here. Use Blender for low-poly modular ship parts and export glTF/GLB for Three.js. Create five legible model signatures, three wreck silhouettes, a consistent crate set and console icons before decorative art. Keep an asset license ledger; only ship assets whose licenses permit redistribution in the game. Do not add unlicensed reference-game models. Asset selection and sourcing have not been performed by this commit.
+
+## Deferred
+Detailed ship destruction, persistent economy, large AI populations, procedural wreck interiors, full ship-to-ship maneuvering, voice, mobile input, advanced animation and photorealistic assets.
+================================================================================
+END FILE: docs/development-plan.md
+================================================================================
+
+
+================================================================================
+BEGIN FILE: package.json
+================================================================================
+{
+  "name": "orbit-salvage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "2–4 player cooperative 3D salvage prototype",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test tests/*.test.js",
+    "check": "node --check server/index.js && node --check shared/game.js && node --check public/client.js && node --check public/scene.js"
+  },
+  "dependencies": {
+    "three": "0.180.0",
+    "ws": "8.18.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  }
+}
+================================================================================
+END FILE: package.json
+================================================================================
+
+
+================================================================================
+BEGIN FILE: playwright.config.js
+================================================================================
+import {defineConfig} from '@playwright/test';
+export default defineConfig({testDir:'tests',testMatch:'**/*.spec.js',use:{baseURL:'http://127.0.0.1:3000',launchOptions:{args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']}},webServer:{command:'npm start',url:'http://127.0.0.1:3000/health',reuseExistingServer:!process.env.CI},reporter:'list'});
+================================================================================
+END FILE: playwright.config.js
+================================================================================
+
+
+================================================================================
+BEGIN FILE: public/client.js
+================================================================================
+import {createScene} from './scene.js';
+import {STATIONS,MODELS,MODEL_KEYS,GOODS,UPGRADES,distance,holdDimensions,volume,facingClue,tractorSlot} from '/shared/game.js';
+const $=id=>document.getElementById(id),esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let view;try{view=createScene($('world'));}catch(e){$('status').textContent='WebGL unavailable: '+e.message;throw e;}
+let tractorEquipped=true,beamDistance=4,beamAngle=0,activeTractor=null;
+let ws,state,id,token=sessionStorage.getItem('orbit-token'),panel=null,yaw=0,pitch=0,sequence=0,keys={},drag=false,toastTimer,rotateDelta=0,rotationId=0,rotationQueue=[],rotationWreck=null;
+const me=()=>state?.players.find(p=>p.id===id);
+function toast(t){$('toast').textContent=t;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').textContent='',5000);}
+function action(type,extra={}){
+ if(ws?.readyState!==1)return null;
+ const seq=Date.now()+'-'+sequence++;ws.send(JSON.stringify({type:'act',seq,action:{type,...extra}}));return seq;
+}
+function flushRotation(){
+ if(!rotateDelta||panel!=='scanner')return;
+ const delta=Math.max(-.15,Math.min(.15,rotateDelta));rotateDelta=0;
+ const n=++rotationId,seq=action('rotate',{delta,rotationId:n});
+ if(seq)rotationQueue.push({id:n,seq,delta});
+}
+function scan(){flushRotation();action('scan');}
+function resetRotation(){rotateDelta=0;rotationQueue=[];drag=false;}
+
+function connect(create=false,resume=false){
+ if(ws)ws.close();$('status').textContent='Connecting…';
+ const socket=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws');ws=socket;
+ socket.onopen=()=>socket.send(JSON.stringify({type:'hello',create,code:$('code').value,name:$('name').value,token:resume?token:null}));
+ socket.onmessage=e=>{
+  const m=JSON.parse(e.data);
+  if(m.type==='welcome'){id=m.id;token=m.token;sessionStorage.setItem('orbit-token',token);$('lobby').hidden=true;for(const el of ['hud','crew','crosshair','logs','controls'])$(el).hidden=false;toast('Room '+m.code+' — share this code. Click the scene to look around.');}
+  if(m.type==='error'){rotationQueue=rotationQueue.filter(r=>r.seq!==m.seq);$('status').textContent=m.message;toast(m.message);}
+  if(m.type==='state'){const received=performance.now();if(lastSnapshot)snapshotGap=Math.max(snapshotGap,received-lastSnapshot);lastSnapshot=received;snapshotCount++;state=m.state;
+   const own=me()?.tractor;
+   if(own?.id!==activeTractor){
+    activeTractor=own?.id||null;
+    if(own){beamDistance=own.distance;beamAngle=own.angle;}
+   }
+   if(rotationWreck!==state.wreck?.id){resetRotation();rotationWreck=state.wreck?.id;}
+   const acknowledged=state.wreck?.rotationAcks?.[id]??-1;
+   rotationQueue=rotationQueue.filter(r=>r.id>acknowledged);
+   view.update(state,id);render();}
+ };
+ socket.onclose=()=>{if(ws===socket)toast('Disconnected. Reload to reconnect; crew seat reserved for 60 seconds.');};
+ socket.onerror=()=>{$('status').textContent='Connection failed. Is the game server running?';};
+}
+$('create').onclick=()=>connect(true);$('join').onclick=()=>connect(false);if(token)connect(false,true);
+function openPanel(key){if(panel==='scanner'&&key!=='scanner'){flushRotation();drag=false;document.exitPointerLock();}panel=key;$('panel').hidden=!key;view.setMode(key);if(key)document.exitPointerLock();htmlCache.delete('panel');renderPanel();}
+const btn=(label,type,data={})=>'<button data-action="'+type+'" data-json="'+esc(JSON.stringify(data))+'">'+esc(label)+'</button>';
+const htmlCache=new Map();
+function setHTML(id,html){if(htmlCache.get(id)!==html){$(id).innerHTML=html;htmlCache.set(id,html);}}
+function render(){
+ const p=me();if(!p)return;
+ setHTML('hud','<strong>ORBIT / '+esc(state.code)+'</strong><span>CREW <b>'+state.players.filter(p=>p.connected).length+'/4</b></span><span>₡ <b>'+state.credits+'</b></span><span>FUEL '+state.ship.fuel+'/'+state.ship.maxFuel+'</span><span>HULL '+state.ship.hull+'/'+state.ship.maxHull+'</span><span>AFT HATCH <b>'+(state.ship.hatchOpen?'OPEN':'CLOSED')+'</b></span><span>DAY <b>'+state.quota.days+'/'+state.quota.limit+'</b> · QUOTA ₡'+state.quota.amount+(state.quota.due?' · PAYMENT DUE — MARKET REQUIRED':'')+'</span>'+(state.encounter?'<span class="threat-indicator">'+(state.encounter.type==='police'?'POLICE · PORT':'RAIDERS · STARBOARD')+' · '+state.encounter.stage.toUpperCase()+' · HP '+state.encounter.hp+'</span>':''));
+ setHTML('crew',state.players.map(p=>esc(p.name)+(p.id===state.captain?' ★':'')+' · '+(p.connected?p.hp+' HP':'offline')).join('<br>')+'<br><br>'+state.phase.toUpperCase()+' / '+esc(state.location)+(state.encounter?'<br>'+state.encounter.type.toUpperCase()+' · '+state.encounter.stage+'<br>'+Math.max(0,Math.ceil((state.encounter.until||state.time)-state.time))+' sec · HP '+state.encounter.hp:''));
+ setHTML('logs',state.log.slice(0,5).map(l=>'<div>'+esc(l.text)+'</div>').join(''));
+ $('shutter').hidden=!state.wreck?.crunchAt;
+ const near=nearest(),attached=p.tractor&&state.cargo.find(c=>c.id===p.tractor.id);
+ $('tractor-status').textContent=tractorEquipped?(attached?'TRACTOR LOCKED · '+attached.type.toUpperCase()+' · '+beamDistance.toFixed(1)+'m':'TRACTOR READY [T]'):'TRACTOR STOWED [T]';
+ $('tractor-status').classList.toggle('active',!!attached);
+ const slot=attached?tractorSlot(state,attached):null;
+ $('placement').textContent=attached?(slot?(slot.valid?(slot.autoRotate?'GREEN GRID · E TO TIP & SECURE':'GREEN GRID · E TO MAGNETICALLY SECURE'):'RED GRID · ROTATE TO ALIGN'):attached.pos[2]>7?'CLEAR REAR HATCH · PULL ENTIRE CRATE INTO HOLD':'MOVE CARGO NEAR AN OPEN FLOOR SLOT'):'';
+ $('placement').className=slot?.valid?'valid':slot?'invalid':'';
+ $('prompt').textContent=panel?'':p.tractor?'E · Secure in green grid · Q releases beam':near?'E · '+(near.key==='hatch'?(state.ship.hatchOpen?'Close rear cargo hatch':'Open rear cargo hatch'):near.label):'Aim at salvage and left-click to tractor · H operates aft hatch';
+ if(panel)renderPanel();
+ $('room-code').textContent=state.code;$('quick-actions').hidden=false;
+ $('stamina').textContent='STAMINA '+Math.round(p.stamina??100)+'%'+(p.sprintExhausted?' · recovering':'');
+}
+function nearest(){
+ const p=me();if(!p)return null;
+ const options=Object.entries(STATIONS).map(([key,pos])=>({key,pos,label:key.toUpperCase()}));
+ options.sort((a,b)=>distance(p.pos,a.pos)-distance(p.pos,b.pos));return options[0]&&distance(p.pos,options[0].pos)<4?options[0]:null;
+}
+function renderPanel(){
+ if(!panel||!state)return;const p=me(),w=state.wreck;let html='<button data-close>← BACK TO DECK</button><h2>'+panel.toUpperCase()+'</h2>';
+ if(panel==='board')html+='<p>Accept contracts anywhere with C. Start with free contracts. Purchases use the shared account. Coordinates without rights produce illegal salvage.</p>'+state.leads.map(l=>'<article><strong>'+esc(l.name)+'</strong><p>'+esc(l.owner)+' · '+l.range+' fuel · '+esc(l.threat)+'</p>'+btn(l.accepted?'ACCEPTED':l.cost?'Buy · ₡'+l.cost:'Accept · FREE','accept',{id:l.id})+'</article>').join('');
+ if(panel==='nav'){
+  html+='<p>Close the rear cargo hatch before departure. Captain commits travel. All crew must be aboard and all cargo secured; loose crates inside block departure until tractored into a grid or discarded at CARGO. When quota is due, either market remains accessible to sell; payment is deducted automatically when credits cover it. First station departure each quota is free; subsequent station departures and leaving salvaged wrecks cost one day.</p>';
+  for(const target of [{id:'A',name:'Market A · industrial premium'},{id:'B',name:'Market B · technical / restricted'},...(!state.quota.due?state.leads.filter(l=>l.accepted):[])])html+=btn('Travel: '+target.name,'travel',{id:target.id});
+  if(state.encounter)html+='<p>ENCOUNTER IN VIEW: '+(state.encounter.type==='police'?'POLICE PATROL OFF PORT (LEFT)':'RAIDER SHIP OFF STARBOARD (RIGHT)')+'. Look through the side hull panels to spot it. Enemy hull '+state.encounter.hp+' HP. Incoming cannon flashes indicate actual hits.</p>';
+   html+='<article>'+btn('Ship cannon','shipfire')+btn('Boost escape · 10 fuel','boost')+btn('Pay police fine · ₡'+(state.encounter?.fine||0),'payfine')+btn('Fight police · 30s distress clock','fight')+'</article>';
+  if(state.quota.due)html+=btn('Use one extension · +7 days, same quota','extend');
+  html+=btn('Rescue tow: lose cargo, +₡300 quota +1 day','tow');
+ }
+ if(panel==='scanner'){
+  if(!w)html+='<p>Travel to a wreck first.</p>';
+  else{
+   html+='<p>Lock grapple, then hold the mouse button on the scene and drag to rotate without screen edges. Press V while dragging to scan. Identification is optional: collect cargo whenever you want. Three matching clues give high confidence; five are certain.</p>'+btn(w.grapple?'Release grapple':'Lock grapple','grapple')+btn('V · Scan '+MODEL_KEYS[facingClue(w)],'scan');
+   html+='<article>'+MODEL_KEYS.map(k=>'<p>'+k.toUpperCase()+': <strong>'+esc(w.clues[k]||'UNSCANNED')+'</strong></p>').join('')+'</article>';
+   html+=catalog(w);
+   html+='<article><p>Crunch destroys all cargo left in the wreck. Return every crew member to the ship first.</p><button data-crunch>CRUNCH WRECK…</button></article>';
+  }
+ }
+ if(panel==='poster')html+='<p>Compare these manufacturer records to scanned clues. Cargo values are estimates, not guaranteed profit.</p>'+catalog(w);
+ if(panel==='cargo'){
+  html+='<p>The wide rear hatch admits bulky cargo that cannot pass the starboard side airlock. Walk to the rear/cargo console, use H or the button below to operate it. Close the hatch before travel. The starter bay still has finite crate-size limits.</p>'+btn(state.ship.hatchOpen?'Close rear cargo hatch':'Open rear cargo hatch','cargoHatch')+'<p>All salvage must be recovered with handheld tractor beams. E secures the crate when the magnetic grid is green. The grid can automatically turn a crate onto its side when that orientation fits the bay. Capacity is based on actual dimensions, not volume alone. Shielding protects only secured cargo.</p>';
+  for(const b of state.ship.containers){const d=holdDimensions(b),used=state.cargo.filter(c=>c.state==='secured'&&c.container===b.id).reduce((n,c)=>n+volume(c.dims),0);html+='<article><strong>'+b.name+' · '+used+'/'+volume(d)+' m³</strong><p>'+d.join('×')+'m · Shield '+b.shield+' · Detection '+Math.round(100*2**-b.shield)+'%</p>'+'</article>';}
+  html+=state.cargo.filter(c=>c.state==='loose'&&c.pos[0]>=-4.4&&c.pos[0]<=4.4&&c.pos[2]>=-10.2&&c.pos[2]<=10.2).map(c=>'<article>UNSECURED: '+GOODS[c.type].name+' · '+c.dims.join('×')+'m · Tractor to secure, or '+btn('Discard loose crate','jettison',{id:c.id})+'</article>').join('');
+  html+=state.cargo.filter(c=>c.state==='secured').map(c=>'<article>'+GOODS[c.type].name+' · '+c.dims.join('×')+'m'+(c.illegal?' · ILLEGAL':'')+btn('Jettison','jettison',{id:c.id})+'</article>').join('');
+ }
+ if(panel==='market'){
+  html+='<p>Prices refresh with travel days. A favors industrial goods; B favors technology and accepts prohibited cargo. When quota is due, payment is automatically deducted once the crew has enough credits here. Sell your cargo first if you cannot yet afford it.</p><table><tr><th>Cargo</th><th>A</th><th>B</th></tr>'+Object.entries(GOODS).map(([k,g])=>'<tr><td>'+g.name+'</td><td>'+state.prices.A[k]+'</td><td>'+state.prices.B[k]+'</td></tr>').join('')+'</table>';
+  const crates=state.cargo.filter(c=>c.state==='secured');html+=btn('Sell all accepted cargo','sell',{ids:crates.map(c=>c.id)});
+  for(const c of crates)html+=btn('Sell '+GOODS[c.type].name+' · '+volume(c.dims)+'m³','sell',{id:c.id});
+  if(state.quota.due)html+='<article><p>QUOTA DUE: ₡'+state.quota.amount+' · Balance ₡'+state.credits+'. Sell cargo to cover the payment; it will be deducted automatically when affordable. If you cannot pay, extend or explicitly forfeit your ship.</p>'+btn(state.credits>=state.quota.amount?'SETTLE QUOTA':'Forfeit ship (cannot pay)','settle')+btn('Use ship extension · +7 days','extend')+'</article>';
+ }
+ if(panel==='engineering'){
+  html+=btn('Refuel +25 · ₡4/unit at A, ₡5 at B','refuel')+btn('Repair +25 · ₡3/HP docked, ₡5 underway','repair');
+  html+='<article>'+Object.entries(UPGRADES).map(([key,u])=>btn(u.name+' '+state.ship.upgrades[key]+'/'+u.max+' · ₡'+u.cost*(state.ship.upgrades[key]+1),'upgrade',{key})).join('')+'</article><p>First shield conversion halves bay capacity. Later levels preserve that capacity and halve detection odds again. Empty a bay before conversion.</p>';
+  for(const b of state.ship.containers)html+=btn(b.name+' shield L'+(b.shield+1)+' · ₡'+500*2**b.shield,'upgrade',{key:'shield',container:b.id});
+ }
+ setHTML('panel',html);
+}
+function catalog(w){return MODELS.map(m=>{const matched=MODEL_KEYS.filter((k,i)=>w?.clues[k]===m.clues[i]).length;return '<article><strong>'+m.name+'</strong><p>'+m.clues.map(esc).join(' / ')+'<br>'+m.owner+' · estimated ₡'+m.estimate+'<br>'+matched+'/5 matching clues</p>'+((panel==='scanner')?btn('Identify as '+m.name,'guess',{model:m.id}):'')+'</article>';}).join('');}
+$('panel').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.hasAttribute('data-close'))openPanel(null);else if(b.hasAttribute('data-crunch')){b.outerHTML=btn('CONFIRM: destroy contents and crunch','crunch');}else if(b.dataset.action==='scan')scan();else if(b.dataset.action)action(b.dataset.action,JSON.parse(b.dataset.json||'{}'));};
+
+$('world').onclick=()=>{if(state&&!panel)$('world').requestPointerLock();};
+$('world').addEventListener('pointerdown',e=>{
+ if(panel!=='scanner'||e.button!==0)return;
+ e.preventDefault();drag=true;$('world').setPointerCapture(e.pointerId);
+ const request=$('world').requestPointerLock();
+ request?.catch(()=>toast('Cursor capture unavailable. Drag remains active until release.'));
+});
+window.addEventListener('pointerup',e=>{
+ if(!drag)return;flushRotation();drag=false;
+ if($('world').hasPointerCapture(e.pointerId))$('world').releasePointerCapture(e.pointerId);
+ if(panel==='scanner')document.exitPointerLock();
+});
+window.addEventListener('pointercancel',()=>{drag=false;rotateDelta=0;});
+$('world').addEventListener('pointerdown',e=>{
+ if(panel||!state||!tractorEquipped||e.button!==0)return;
+ const p=me();if(!p)return;
+ if(p.tractor){action('tractorRelease');return;}
+ const crate=view.targetCargo();
+ if(crate){action('tractorAttach',{id:crate});} 
+});
+$('world').addEventListener('contextmenu',e=>{e.preventDefault();if(me()?.tractor)action('tractorRelease');});
+window.addEventListener('wheel',e=>{
+ if(!panel&&me()?.tractor){e.preventDefault();beamDistance=Math.max(2,Math.min(14,beamDistance+Math.sign(e.deltaY)*.6));}
+},{passive:false});
+
+document.addEventListener('pointerlockchange',()=>{if(!document.pointerLockElement)drag=false;});
+window.addEventListener('mousemove',e=>{
+ if(drag&&panel==='scanner'){
+  rotateDelta=Math.max(-.15,Math.min(.15,rotateDelta+e.movementX*.005));
+ }else if(document.pointerLockElement&&!panel){
+  if(keys.KeyR&&me()?.tractor){beamAngle+=e.movementX*.012;}
+  else{yaw-=e.movementX*.002;pitch=Math.max(-1.4,Math.min(1.4,pitch-e.movementY*.002));}
+ }
+});
+window.addEventListener('keydown',e=>{
+ if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))return;
+ keys[e.code]=true;if(['Space','Tab'].includes(e.code))e.preventDefault();if(e.repeat)return;
+ if(e.code==='Escape'){openPanel(null);keys={};}
+ if(e.code==='KeyE'){if(panel){openPanel(null);return;}if(me()?.tractor){action('tractorSecure');return;}const n=nearest();if(n?.key==='hatch')action('cargoHatch');else if(n)openPanel(n.key);}
+ if(e.code==='KeyC')openPanel(panel==='board'?null:'board');
+ if(e.code==='KeyH')action('cargoHatch');
+ if(e.code==='KeyT'){
+  tractorEquipped=!tractorEquipped;
+  if(!tractorEquipped&&me()?.tractor)action('tractorRelease');
+  toast(tractorEquipped?'Tractor tool ready. Aim and left-click cargo.':'Tractor tool stowed.');
+ }
+ if(e.code==='KeyQ'&&me()?.tractor)action('tractorRelease');if(e.code==='KeyV'){e.preventDefault();scan();}
+ if(e.code==='KeyF'){if(panel==='nav')action('shipfire');else{const p=me();const targets=(state?.wreck?.enemies||[]).filter(e=>e.hp>0).sort((a,b)=>distance(a.pos,p.pos)-distance(b.pos,p.pos));if(targets[0])action('shoot',{id:targets[0].id});}}
+});
+window.addEventListener('keyup',e=>delete keys[e.code]);window.addEventListener('blur',()=>{keys={};drag=false;rotateDelta=0;});
+setInterval(()=>{flushRotation();if(state&&ws?.readyState===1)ws.send(JSON.stringify({type:'input',...(me()?.tractor?.id===activeTractor&&activeTractor?{tractorDistance:beamDistance,tractorAngle:beamAngle}:{}),x:panel?0:Number(!!keys.KeyD)-Number(!!keys.KeyA),z:panel?0:Number(!!keys.KeyW)-Number(!!keys.KeyS),y:panel?0:Number(!!keys.Space)-Number(!!keys.ControlLeft),sprint:!panel&&(!!keys.ShiftLeft||!!keys.ShiftRight),yaw,pitch}));},50);
+const perf=document.createElement('div');perf.id='performance';
+perf.style.cssText='position:fixed;bottom:38px;left:22px;color:#a9c3c9;font:11px monospace;pointer-events:none;background:#0b1824cc;padding:4px 8px';
+document.body.append(perf);
+let frames=0,longFrames=0,lastFrame=performance.now(),lastReport=lastFrame,lastSnapshot=0,snapshotGap=0,snapshotCount=0;
+function animate(){
+ const now=performance.now(),gap=now-lastFrame;lastFrame=now;frames++;if(gap>50)longFrames++;
+ const w=state?.wreck;
+ view.setScannerYaw(w?w.yaw+(rotationQueue.reduce((n,r)=>n+r.delta,0)+rotateDelta)*(1+(state.ship.upgrades.grapple||0)*.3):null);
+ view.frame(yaw,pitch);
+ if(now-lastReport>=1000){
+  perf.textContent='crew v3 · '+Math.round(frames*1000/(now-lastReport))+' FPS · stalls >50ms: '+longFrames+' · updates '+snapshotCount+'/s · longest gap '+Math.round(snapshotGap)+'ms';
+  frames=0;longFrames=0;snapshotCount=0;snapshotGap=0;lastReport=now;
+ }
+ requestAnimationFrame(animate);
+}
+animate();
+
+$('contracts-anywhere').onclick=()=>openPanel(panel==='board'?null:'board');
+$('copy-room').onclick=async()=>{
+ if(!state)return;
+ try{await navigator.clipboard.writeText(state.code);toast('Room code copied: '+state.code);}
+ catch{toast('Room code: '+state.code+' — select and copy it from the top right.');}
+};
+================================================================================
+END FILE: public/client.js
+================================================================================
+
+
+================================================================================
+BEGIN FILE: public/index.html
+================================================================================
+<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ORBIT — cooperative salvage</title><link rel="stylesheet" href="/style.css"></head><body>
+<canvas id="world"></canvas>
+<section id="lobby"><div class="eyebrow">ORBITAL RECOVERY BUREAU // PROTOTYPE 01</div><h1>ORBIT<span>Nothing out here is free.</span></h1><p>One ship. One account. Seven days to pay.<br>Recover wrecks with a crew of 2–4.</p><label>CREW NAME<input id="name" maxlength="18" value="Salvager"></label><button id="create">START A CREW ↗</button><div class="join"><input id="code" placeholder="ROOM CODE" maxlength="6" aria-label="Room code"><button id="join">JOIN</button></div><p id="status">Desktop keyboard + mouse • share your room code with friends</p><details><summary>Read the flight manual</summary><p>Press C to accept a free contract anywhere. Hold Shift to move twice as fast while stamina lasts. Captain chooses coordinates at navigation. Grapple and rotate the wreck at the scanner; V scans a component. Identification is optional. Compare clues to ship posters to plan your salvage.</p><p>For bulky salvage, walk aft and press H near the rear cargo hatch to open both doors. Bring cargo through the wide opening, then close it before departure. The starboard side airlock remains available for EVA. Press T to equip the handheld tractor (equipped by default); aim and left-click to attach loose cargo, use the mouse wheel to adjust distance, hold R and move the mouse to rotate, then E on a green cargo grid to secure. Right-click or Q releases. Loose crates inside the ship must be secured or discarded from the CARGO console before departure. You can reattach loose crates with the tractor even when docked. Cargo must be recovered using the tractor: hand-pickup and auto-stow are no longer available. If a crate matches the bay volume but not its original orientation, the magnetic grid automatically tips it onto its side when you secure it. Crunch destroys everything still inside the wreck and produces Scrap. Sell at either market; compare prices before traveling.</p><p>First departure each quota is free. Further station departures and leaving a wreck after taking salvage consume one day. The quota clock stops at the deadline (7/7). When payment comes due, the captain can still return to either Market A or B to sell cargo. If credits are sufficient at a market, the quota is automatically deducted and the next seven-day cycle begins. Other wreck destinations are locked until the crew pays or extends the quota. One extension per ship adds seven days to the same quota. Failure to pay repossesses everything and resets credits to 1,000.</p></details></section>
+<header id="hud" hidden></header><nav id="quick-actions" hidden><span>ROOM <strong id="room-code"></strong></span><button id="copy-room">Copy code</button><button id="contracts-anywhere">Contracts [C]</button><span id="stamina">STAMINA 100%</span><span id="tractor-status" aria-live="polite">TRACTOR READY [T]</span></nav><aside id="crew" hidden></aside><div id="crosshair" hidden>+</div><div id="prompt"></div><div id="placement" aria-live="polite"></div><div id="toast" role="status"></div><aside id="panel" hidden></aside><div id="logs" hidden></div><footer id="controls" hidden>WASD move · Shift sprint · C contracts · H rear cargo hatch · T tractor · Left-click cargo lock/release · Wheel push/pull · R + mouse rotate · E secure · Right-click/Q release · V scan · F fire · Space/Ctrl EVA</footer><div id="shutter" hidden>CRUNCH IN PROGRESS<br><small>Blast shutters closed</small></div>
+<script type="module" src="/client.js"></script></body></html>
+================================================================================
+END FILE: public/index.html
+================================================================================
